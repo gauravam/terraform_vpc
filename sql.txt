@@ -1,275 +1,177 @@
 import pandas as pd
 import cx_Oracle
-import datetime
 import numpy as np
+from typing import Dict, Union, List
 
-# Dictionary mapping Oracle data types to pandas data types, organized by category
-ORACLE_TO_PANDAS_TYPE_MAP = {
-    # String/Character types
-    'String Types': {
-        'DB_TYPE_VARCHAR': 'string',
-        'DB_TYPE_NVARCHAR': 'string',
-        'DB_TYPE_CHAR': 'string',
-        'DB_TYPE_NCHAR': 'string',
-        'DB_TYPE_CLOB': 'string',
-        'DB_TYPE_NCLOB': 'string',
-        'DB_TYPE_LONG': 'string',
-        'DB_TYPE_ROWID': 'string'
-    },
-    
-    # Numeric types
-    'Numeric Types': {
-        'DB_TYPE_NUMBER': 'Int64/float64',  # Determined at runtime
-        'DB_TYPE_BINARY_FLOAT': 'float32',
-        'DB_TYPE_BINARY_DOUBLE': 'float64',
-        'DB_TYPE_BOOLEAN': 'boolean'
-    },
-    
-    # Date and Time types
-    'Date/Time Types': {
-        'DB_TYPE_DATE': 'datetime64[ns]',
-        'DB_TYPE_TIMESTAMP': 'datetime64[ns]',
-        'DB_TYPE_TIMESTAMP_TZ': 'datetime64[ns]',
-        'DB_TYPE_TIMESTAMP_LTZ': 'datetime64[ns]',
-        'DB_TYPE_INTERVAL_YM': 'timedelta64[ns]',
-        'DB_TYPE_INTERVAL_DS': 'timedelta64[ns]'
-    },
-    
-    # Binary types
-    'Binary Types': {
-        'DB_TYPE_BLOB': 'bytes (preserved)',
-        'DB_TYPE_BFILE': 'bytes (preserved)',
-        'DB_TYPE_LONG_RAW': 'bytes (preserved)',
-        'DB_TYPE_RAW': 'bytes (preserved)'
-    },
-    
-    # Complex types
-    'Complex Types': {
-        'DB_TYPE_OBJECT': 'preserved as Oracle object',
-        'DB_TYPE_CURSOR': 'preserved as Oracle cursor'
-    }
-}
 
-def table_to_dataframe(connection, schema, table):
+def oracle_to_pandas(connection: cx_Oracle.Connection, schema_name: str, table_name: str) -> pd.DataFrame:
     """
-    Convert an Oracle table into a pandas DataFrame,
-    preserving the original Oracle data types.
+    Read an Oracle table and preserve its schema in a pandas DataFrame.
     
-    Parameters:
-    connection (cx_Oracle.Connection): Oracle database connection
-    schema (str): Schema name containing the table
-    table (str): Table name to convert to DataFrame
-    
+    Args:
+        connection: An existing cx_Oracle database connection
+        schema_name: Oracle schema name
+        table_name: Oracle table name
+        
     Returns:
-    tuple: (pandas.DataFrame, dict) - DataFrame with data and dictionary with column type mappings
-    
-    Example:
-    ```
-    import cx_Oracle
-    
-    # Connect to Oracle database
-    connection = cx_Oracle.connect('username/password@hostname:port/service_name')
-    
-    # Convert table to DataFrame and get type mapping
-    df, type_mapping = table_to_dataframe(connection, 'HR', 'EMPLOYEES')
-    
-    # View type mapping
-    print(type_mapping)
-    
-    # Close connection
-    connection.close()
-    ```
+        pd.DataFrame: Pandas DataFrame with data from the Oracle table with preserved schema
     """
-    # Create cursor
     cursor = connection.cursor()
     
-    # Execute query
-    query = f"SELECT * FROM {schema}.{table}"
+    # Get column metadata from Oracle
+    full_table_name = f'"{schema_name}"."{table_name}"'
+    query = f"""
+    SELECT column_name, data_type, data_precision, data_scale, nullable
+    FROM all_tab_columns
+    WHERE owner = '{schema_name}' AND table_name = '{table_name}'
+    ORDER BY column_id
+    """
+    
     cursor.execute(query)
+    columns_info = cursor.fetchall()
     
-    # Get column names and types from cursor description
-    columns = []
-    oracle_types = {}
+    # Define categories for type mapping
+    string_types = [
+        'VARCHAR2', 'NVARCHAR2', 'VARCHAR', 'CHAR', 'NCHAR', 'STRING',
+        'CLOB', 'NCLOB', 'LONG', 'LONG VARCHAR', 'ROWID', 'UROWID',
+        'CHARACTER', 'CHARACTER VARYING', 'NATIONAL CHARACTER', 
+        'NATIONAL CHARACTER VARYING', 'TEXT'
+    ]
     
-    for idx, col_desc in enumerate(cursor.description):
-        col_name = col_desc[0]
-        oracle_type = col_desc[1]
-        columns.append(col_name)
-        oracle_types[idx] = oracle_type
+    numeric_types = [
+        'NUMBER', 'FLOAT', 'INTEGER', 'INT', 'SMALLINT', 'BINARY_FLOAT', 
+        'BINARY_DOUBLE', 'DECIMAL', 'NUMERIC', 'DOUBLE PRECISION', 'REAL'
+    ]
     
-    # Fetch all rows from cursor
-    data = cursor.fetchall()
+    date_types = [
+        'DATE', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE', 
+        'TIMESTAMP WITH LOCAL TIME ZONE', 'INTERVAL DAY TO SECOND',
+        'INTERVAL YEAR TO MONTH'
+    ]
     
-    # Create DataFrame from data and column names
-    df = pd.DataFrame(data, columns=columns)
+    binary_types = ['RAW', 'LONG RAW', 'BLOB', 'BFILE']
     
-    # Dictionary to store actual type mappings for this specific data
-    type_mapping = {
-        'String Types': {},
-        'Numeric Types': {},
-        'Date/Time Types': {},
-        'Binary Types': {},
-        'Complex Types': {},
-        'Other Types': {}
-    }
+    # Create type mapping from Oracle to pandas
+    type_map = {}
     
-    # Apply appropriate pandas dtypes based on Oracle types
-    for idx, oracle_type in oracle_types.items():
-        col_name = columns[idx]
-        type_name = oracle_type.__class__.__name__
+    # Add string types
+    for t in string_types:
+        type_map[t] = lambda prec, scale: 'object'
+    
+    # Add numeric types with specific handling
+    type_map['NUMBER'] = lambda prec, scale: np.int64 if scale == 0 else np.float64
+    type_map['FLOAT'] = lambda prec, scale: np.float64
+    type_map['INTEGER'] = lambda prec, scale: np.int64
+    type_map['INT'] = lambda prec, scale: np.int64
+    type_map['SMALLINT'] = lambda prec, scale: np.int32
+    type_map['BINARY_FLOAT'] = lambda prec, scale: np.float32
+    type_map['BINARY_DOUBLE'] = lambda prec, scale: np.float64
+    type_map['DECIMAL'] = lambda prec, scale: np.int64 if scale == 0 else np.float64
+    type_map['NUMERIC'] = lambda prec, scale: np.int64 if scale == 0 else np.float64
+    type_map['DOUBLE PRECISION'] = lambda prec, scale: np.float64
+    type_map['REAL'] = lambda prec, scale: np.float32
+    
+    # Add date types
+    for t in date_types:
+        type_map[t] = lambda prec, scale: 'datetime64[ns]'
+    
+    # Add binary types
+    for t in binary_types:
+        type_map[t] = lambda prec, scale: 'object'
+    
+    # Extract the column types for pandas dtype specification
+    column_names = []
+    dtypes = {}
+    date_columns = []
+    
+    for col in columns_info:
+        col_name = col[0]
+        col_type = col[1]
+        precision = col[2]  # can be None
+        scale = col[3]      # can be None
         
-        # Handle Oracle NUMBER types
-        if isinstance(oracle_type, cx_Oracle.DB_TYPE_NUMBER):
-            # Check if the column contains integers or floats
-            # If all values can be converted to int without loss, use int dtype
-            if df[col_name].dropna().apply(lambda x: x == int(x)).all():
-                df[col_name] = df[col_name].astype('Int64')  # pandas nullable integer type
-                type_mapping['Numeric Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'Int64'}
+        column_names.append(col_name)
+        
+        if col_type in type_map:
+            if col_type in ('DATE', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE', 'TIMESTAMP WITH LOCAL TIME ZONE'):
+                date_columns.append(col_name)
             else:
-                df[col_name] = df[col_name].astype('float64')
-                type_mapping['Numeric Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'float64'}
-                
-        # Handle Oracle DATE types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_DATE):
-            df[col_name] = pd.to_datetime(df[col_name])
-            type_mapping['Date/Time Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'datetime64[ns]'}
-            
-        # Handle Oracle TIMESTAMP types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_TIMESTAMP):
-            df[col_name] = pd.to_datetime(df[col_name])
-            type_mapping['Date/Time Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'datetime64[ns]'}
-            
-        # Handle Oracle TIMESTAMP WITH TIME ZONE types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_TIMESTAMP_TZ):
-            df[col_name] = pd.to_datetime(df[col_name])
-            type_mapping['Date/Time Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'datetime64[ns]'}
-            
-        # Handle Oracle TIMESTAMP WITH LOCAL TIME ZONE types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_TIMESTAMP_LTZ):
-            df[col_name] = pd.to_datetime(df[col_name])
-            type_mapping['Date/Time Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'datetime64[ns]'}
-            
-        # Handle Oracle INTERVAL YEAR TO MONTH types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_INTERVAL_YM):
-            # Converted to pandas timedelta
-            df[col_name] = pd.to_timedelta(df[col_name])
-            type_mapping['Date/Time Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'timedelta64[ns]'}
-            
-        # Handle Oracle INTERVAL DAY TO SECOND types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_INTERVAL_DS):
-            # Converted to pandas timedelta
-            df[col_name] = pd.to_timedelta(df[col_name])
-            type_mapping['Date/Time Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'timedelta64[ns]'}
-            
-        # Handle Oracle CLOB types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_CLOB):
-            # Ensure CLOBs are read as strings
-            df[col_name] = df[col_name].astype('string')
-            type_mapping['String Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'string'}
-            
-        # Handle Oracle NCLOB types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_NCLOB):
-            # Ensure NCLOBs are read as strings
-            df[col_name] = df[col_name].astype('string')
-            type_mapping['String Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'string'}
-            
-        # Handle Oracle BLOB types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_BLOB):
-            # Keep as bytes objects
-            type_mapping['Binary Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'bytes (preserved)'}
-            
-        # Handle Oracle BFILE types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_BFILE):
-            # Keep as binary file locators
-            type_mapping['Binary Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'bytes (preserved)'}
-            
-        # Handle Oracle LONG types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_LONG):
-            df[col_name] = df[col_name].astype('string')
-            type_mapping['String Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'string'}
-            
-        # Handle Oracle LONG RAW types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_LONG_RAW):
-            # Keep as bytes objects
-            type_mapping['Binary Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'bytes (preserved)'}
-            
-        # Handle Oracle RAW types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_RAW):
-            # Keep as bytes objects
-            type_mapping['Binary Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'bytes (preserved)'}
-            
-        # Handle Oracle ROWID types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_ROWID):
-            df[col_name] = df[col_name].astype('string')
-            type_mapping['String Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'string'}
-            
-        # Handle Oracle VARCHAR2 types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_VARCHAR):
-            df[col_name] = df[col_name].astype('string')
-            type_mapping['String Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'string'}
-            
-        # Handle Oracle NVARCHAR types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_NVARCHAR):
-            df[col_name] = df[col_name].astype('string')
-            type_mapping['String Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'string'}
-            
-        # Handle Oracle CHAR types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_CHAR):
-            df[col_name] = df[col_name].astype('string')
-            type_mapping['String Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'string'}
-            
-        # Handle Oracle NCHAR types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_NCHAR):
-            df[col_name] = df[col_name].astype('string')
-            type_mapping['String Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'string'}
-            
-        # Handle Oracle BINARY_FLOAT types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_BINARY_FLOAT):
-            df[col_name] = df[col_name].astype('float32')
-            type_mapping['Numeric Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'float32'}
-            
-        # Handle Oracle BINARY_DOUBLE types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_BINARY_DOUBLE):
-            df[col_name] = df[col_name].astype('float64')
-            type_mapping['Numeric Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'float64'}
-            
-        # Handle Oracle BOOLEAN types (represented as NUMBER(1) in Oracle)
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_BOOLEAN):
-            df[col_name] = df[col_name].astype('boolean')
-            type_mapping['Numeric Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'boolean'}
-            
-        # Handle Oracle OBJECT types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_OBJECT):
-            # Keep as Oracle objects, can't be directly converted to pandas types
-            type_mapping['Complex Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'preserved as Oracle object'}
-            
-        # Handle Oracle CURSOR types
-        elif isinstance(oracle_type, cx_Oracle.DB_TYPE_CURSOR):
-            # Can't be directly converted to pandas types
-            # These would typically be handled separately
-            type_mapping['Complex Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'preserved as Oracle cursor'}
-        
-        else:
-            # For any unhandled type, record it in the mapping
-            type_mapping['Other Types'][col_name] = {'oracle_type': type_name, 'pandas_type': 'unknown/preserved'}
+                dtypes[col_name] = type_map[col_type](precision, scale)
     
-    # Remove empty categories from type_mapping
-    for category in list(type_mapping.keys()):
-        if not type_mapping[category]:
-            del type_mapping[category]
+    # Prepare to query the data
+    query = f'SELECT * FROM {full_table_name}'
     
-    # Close cursor
+    # Execute query and fetch data
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    
+    # Create DataFrame with proper column names
+    df = pd.DataFrame(rows, columns=column_names)
+    
+    # Apply data type conversions
+    for col_name, dtype in dtypes.items():
+        if col_name in df.columns:
+            try:
+                df[col_name] = df[col_name].astype(dtype)
+            except (ValueError, TypeError):
+                # If conversion fails, keep as is
+                pass
+    
+    # Convert date columns separately
+    for date_col in date_columns:
+        if date_col in df.columns:
+            df[date_col] = pd.to_datetime(df[date_col])
+    
     cursor.close()
-    
-    return df, type_mapping
+    return df
 
 
-def get_oracle_type_mapping():
+def get_table_schema(connection: cx_Oracle.Connection, schema_name: str, table_name: str) -> Dict:
     """
-    Returns a dictionary of Oracle data types to pandas data types,
-    organized by category.
+    Get schema information for a specific Oracle table.
     
+    Args:
+        connection: An existing cx_Oracle database connection
+        schema_name: Oracle schema name
+        table_name: Oracle table name
+        
     Returns:
-    dict: Dictionary mapping Oracle data types to pandas data types
+        Dict: Dictionary with column names as keys and their data types as values
     """
-    return ORACLE_TO_PANDAS_TYPE_MAP
+    cursor = connection.cursor()
+    
+    query = f"""
+    SELECT column_name, data_type, data_length, data_precision, data_scale, nullable
+    FROM all_tab_columns
+    WHERE owner = '{schema_name}' AND table_name = '{table_name}'
+    ORDER BY column_id
+    """
+    
+    cursor.execute(query)
+    columns_info = cursor.fetchall()
+    
+    schema = {}
+    for col in columns_info:
+        col_name = col[0]
+        col_type = col[1]
+        length = col[2]
+        precision = col[3]
+        scale = col[4]
+        nullable = col[5]
+        
+        type_desc = col_type
+        if col_type == 'NUMBER' and precision is not None:
+            if scale == 0:
+                type_desc = f'NUMBER({precision})'
+            else:
+                type_desc = f'NUMBER({precision},{scale})'
+        elif col_type in ('VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR'):
+            type_desc = f'{col_type}({length})'
+        
+        schema[col_name] = {
+            'type': type_desc,
+            'nullable': nullable == 'Y'
+        }
+    
+    cursor.close()
+    return schema
