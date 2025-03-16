@@ -1,177 +1,76 @@
 import pandas as pd
 import cx_Oracle
-import numpy as np
-from typing import Dict, Union, List
+from sqlalchemy import create_engine
+from typing import Union, Dict
 
 
-def oracle_to_pandas(connection: cx_Oracle.Connection, schema_name: str, table_name: str) -> pd.DataFrame:
+def oracle_to_pandas(connection: Union[cx_Oracle.Connection, str], schema_name: str, table_name: str) -> pd.DataFrame:
     """
-    Read an Oracle table and preserve its schema in a pandas DataFrame.
+    Read an Oracle table and preserve its schema in a pandas DataFrame using SQLAlchemy.
     
     Args:
-        connection: An existing cx_Oracle database connection
+        connection: Either a cx_Oracle connection object or a SQLAlchemy connection string
         schema_name: Oracle schema name
         table_name: Oracle table name
         
     Returns:
         pd.DataFrame: Pandas DataFrame with data from the Oracle table with preserved schema
     """
-    cursor = connection.cursor()
+    # Create SQLAlchemy engine if given a cx_Oracle connection
+    if isinstance(connection, cx_Oracle.Connection):
+        # Setup output type handler for proper date handling
+        def output_type_handler(cursor, name, defaultType, size, precision, scale):
+            if defaultType == cx_Oracle.DB_TYPE_DATE or defaultType == cx_Oracle.DB_TYPE_TIMESTAMP:
+                return cursor.var(cx_Oracle.DB_TYPE_TIMESTAMP, arraysize=cursor.arraysize)
+        
+        connection.outputtypehandler = output_type_handler
+        
+        # Create SQLAlchemy engine from existing connection
+        engine = create_engine('oracle://', creator=lambda: connection)
+    else:
+        # Assume it's a connection string
+        engine = create_engine(connection)
     
-    # Get column metadata from Oracle
+    # Full table name with schema
     full_table_name = f'"{schema_name}"."{table_name}"'
-    query = f"""
-    SELECT column_name, data_type, data_precision, data_scale, nullable
-    FROM all_tab_columns
-    WHERE owner = '{schema_name}' AND table_name = '{table_name}'
-    ORDER BY column_id
-    """
     
-    cursor.execute(query)
-    columns_info = cursor.fetchall()
+    # Use pandas' built-in read_sql function which preserves types well
+    df = pd.read_sql_table(table_name, engine, schema=schema_name)
     
-    # Define categories for type mapping
-    string_types = [
-        'VARCHAR2', 'NVARCHAR2', 'VARCHAR', 'CHAR', 'NCHAR', 'STRING',
-        'CLOB', 'NCLOB', 'LONG', 'LONG VARCHAR', 'ROWID', 'UROWID',
-        'CHARACTER', 'CHARACTER VARYING', 'NATIONAL CHARACTER', 
-        'NATIONAL CHARACTER VARYING', 'TEXT'
-    ]
-    
-    numeric_types = [
-        'NUMBER', 'FLOAT', 'INTEGER', 'INT', 'SMALLINT', 'BINARY_FLOAT', 
-        'BINARY_DOUBLE', 'DECIMAL', 'NUMERIC', 'DOUBLE PRECISION', 'REAL'
-    ]
-    
-    date_types = [
-        'DATE', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE', 
-        'TIMESTAMP WITH LOCAL TIME ZONE', 'INTERVAL DAY TO SECOND',
-        'INTERVAL YEAR TO MONTH'
-    ]
-    
-    binary_types = ['RAW', 'LONG RAW', 'BLOB', 'BFILE']
-    
-    # Create type mapping from Oracle to pandas
-    type_map = {}
-    
-    # Add string types
-    for t in string_types:
-        type_map[t] = lambda prec, scale: 'object'
-    
-    # Add numeric types with specific handling
-    type_map['NUMBER'] = lambda prec, scale: np.int64 if scale == 0 else np.float64
-    type_map['FLOAT'] = lambda prec, scale: np.float64
-    type_map['INTEGER'] = lambda prec, scale: np.int64
-    type_map['INT'] = lambda prec, scale: np.int64
-    type_map['SMALLINT'] = lambda prec, scale: np.int32
-    type_map['BINARY_FLOAT'] = lambda prec, scale: np.float32
-    type_map['BINARY_DOUBLE'] = lambda prec, scale: np.float64
-    type_map['DECIMAL'] = lambda prec, scale: np.int64 if scale == 0 else np.float64
-    type_map['NUMERIC'] = lambda prec, scale: np.int64 if scale == 0 else np.float64
-    type_map['DOUBLE PRECISION'] = lambda prec, scale: np.float64
-    type_map['REAL'] = lambda prec, scale: np.float32
-    
-    # Add date types
-    for t in date_types:
-        type_map[t] = lambda prec, scale: 'datetime64[ns]'
-    
-    # Add binary types
-    for t in binary_types:
-        type_map[t] = lambda prec, scale: 'object'
-    
-    # Extract the column types for pandas dtype specification
-    column_names = []
-    dtypes = {}
-    date_columns = []
-    
-    for col in columns_info:
-        col_name = col[0]
-        col_type = col[1]
-        precision = col[2]  # can be None
-        scale = col[3]      # can be None
-        
-        column_names.append(col_name)
-        
-        if col_type in type_map:
-            if col_type in ('DATE', 'TIMESTAMP', 'TIMESTAMP WITH TIME ZONE', 'TIMESTAMP WITH LOCAL TIME ZONE'):
-                date_columns.append(col_name)
-            else:
-                dtypes[col_name] = type_map[col_type](precision, scale)
-    
-    # Prepare to query the data
-    query = f'SELECT * FROM {full_table_name}'
-    
-    # Execute query and fetch data
-    cursor.execute(query)
-    rows = cursor.fetchall()
-    
-    # Create DataFrame with proper column names
-    df = pd.DataFrame(rows, columns=column_names)
-    
-    # Apply data type conversions
-    for col_name, dtype in dtypes.items():
-        if col_name in df.columns:
-            try:
-                df[col_name] = df[col_name].astype(dtype)
-            except (ValueError, TypeError):
-                # If conversion fails, keep as is
-                pass
-    
-    # Convert date columns separately
-    for date_col in date_columns:
-        if date_col in df.columns:
-            df[date_col] = pd.to_datetime(df[date_col])
-    
-    cursor.close()
     return df
 
 
-def get_table_schema(connection: cx_Oracle.Connection, schema_name: str, table_name: str) -> Dict:
+def get_table_schema(connection: Union[cx_Oracle.Connection, str], schema_name: str, table_name: str) -> Dict:
     """
     Get schema information for a specific Oracle table.
     
     Args:
-        connection: An existing cx_Oracle database connection
+        connection: Either a cx_Oracle connection object or a SQLAlchemy connection string
         schema_name: Oracle schema name
         table_name: Oracle table name
         
     Returns:
-        Dict: Dictionary with column names as keys and their data types as values
+        Dict: Dictionary with column information
     """
-    cursor = connection.cursor()
+    # Create SQLAlchemy engine if given a cx_Oracle connection
+    if isinstance(connection, cx_Oracle.Connection):
+        engine = create_engine('oracle://', creator=lambda: connection)
+    else:
+        # Assume it's a connection string
+        engine = create_engine(connection)
     
-    query = f"""
-    SELECT column_name, data_type, data_length, data_precision, data_scale, nullable
-    FROM all_tab_columns
-    WHERE owner = '{schema_name}' AND table_name = '{table_name}'
-    ORDER BY column_id
-    """
+    # Use SQLAlchemy's inspect to get table schema
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    columns = inspector.get_columns(table_name, schema=schema_name)
     
-    cursor.execute(query)
-    columns_info = cursor.fetchall()
-    
+    # Format into a more readable dictionary
     schema = {}
-    for col in columns_info:
-        col_name = col[0]
-        col_type = col[1]
-        length = col[2]
-        precision = col[3]
-        scale = col[4]
-        nullable = col[5]
-        
-        type_desc = col_type
-        if col_type == 'NUMBER' and precision is not None:
-            if scale == 0:
-                type_desc = f'NUMBER({precision})'
-            else:
-                type_desc = f'NUMBER({precision},{scale})'
-        elif col_type in ('VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR'):
-            type_desc = f'{col_type}({length})'
-        
-        schema[col_name] = {
-            'type': type_desc,
-            'nullable': nullable == 'Y'
+    for col in columns:
+        schema[col['name']] = {
+            'type': str(col['type']),
+            'nullable': col.get('nullable', True),
+            'default': col.get('default')
         }
     
-    cursor.close()
     return schema
