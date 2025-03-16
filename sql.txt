@@ -35,12 +35,12 @@ def oracle_to_pandas(connection: cx_Oracle.Connection, schema_name: str, table_n
         ORDER BY column_id
         """
         
-        cursor.execute(columns_query, schema=schema_name.upper(), table=table_name.upper())
+        cursor.execute(columns_query, {"schema": schema_name.upper(), "table": table_name.upper()})
         columns = cursor.fetchall()
         
         if not columns:
             # If no columns found, maybe try different case
-            cursor.execute(columns_query, schema=schema_name, table=table_name)
+            cursor.execute(columns_query, {"schema": schema_name, "table": table_name})
             columns = cursor.fetchall()
             
             if not columns:
@@ -111,12 +111,12 @@ def get_table_schema(connection: cx_Oracle.Connection, schema_name: str, table_n
         ORDER BY column_id
         """
         
-        cursor.execute(query, schema=schema_name.upper(), table=table_name.upper())
+        cursor.execute(query, {"schema": schema_name.upper(), "table": table_name.upper()})
         columns = cursor.fetchall()
         
         if not columns:
             # Try with different case
-            cursor.execute(query, schema=schema_name, table=table_name)
+            cursor.execute(query, {"schema": schema_name, "table": table_name})
             columns = cursor.fetchall()
             
             if not columns:
