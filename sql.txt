@@ -1,6 +1,6 @@
 import pandas as pd
 import cx_Oracle
-from typing import Dict
+from typing import Dict, Optional
 
 
 def oracle_to_pandas(connection: cx_Oracle.Connection, schema_name: str, table_name: str) -> pd.DataFrame:
@@ -19,71 +19,74 @@ def oracle_to_pandas(connection: cx_Oracle.Connection, schema_name: str, table_n
     def output_type_handler(cursor, name, defaultType, size, precision, scale):
         if defaultType == cx_Oracle.DB_TYPE_DATE or defaultType == cx_Oracle.DB_TYPE_TIMESTAMP:
             return cursor.var(cx_Oracle.DB_TYPE_TIMESTAMP, arraysize=cursor.arraysize)
+        return None
     
     connection.outputtypehandler = output_type_handler
     
     # Create cursor
     cursor = connection.cursor()
     
-    # Get column metadata
-    columns_query = """
-    SELECT column_name, data_type
-    FROM all_tab_columns
-    WHERE owner = :schema AND table_name = :table
-    ORDER BY column_id
-    """
-    
-    cursor.execute(columns_query, schema=schema_name.upper(), table=table_name.upper())
-    columns = cursor.fetchall()
-    
-    if not columns:
-        # If no columns found, maybe try different case
-        cursor.execute(columns_query, schema=schema_name, table=table_name)
+    try:
+        # Get column metadata
+        columns_query = """
+        SELECT column_name, data_type
+        FROM all_tab_columns
+        WHERE owner = :schema AND table_name = :table
+        ORDER BY column_id
+        """
+        
+        cursor.execute(columns_query, schema=schema_name.upper(), table=table_name.upper())
         columns = cursor.fetchall()
         
         if not columns:
-            raise ValueError(f"Table {schema_name}.{table_name} not found. Check schema and table names.")
+            # If no columns found, maybe try different case
+            cursor.execute(columns_query, schema=schema_name, table=table_name)
+            columns = cursor.fetchall()
+            
+            if not columns:
+                raise ValueError(f"Table {schema_name}.{table_name} not found. Check schema and table names.")
+        
+        # Extract column names
+        column_names = [col[0] for col in columns]
+        
+        # Try different query formats - start with the simplest approach
+        query_formats = [
+            f'SELECT * FROM {schema_name}.{table_name}',
+            f'SELECT * FROM "{schema_name}"."{table_name}"',
+            f'SELECT * FROM {schema_name}."{table_name}"',
+            f'SELECT * FROM "{schema_name}".{table_name}',
+            f'SELECT * FROM {schema_name.upper()}.{table_name.upper()}',
+            f'SELECT * FROM {schema_name.lower()}.{table_name.lower()}'
+        ]
+        
+        # Try each query format until one works
+        success = False
+        last_error = None
+        
+        for query in query_formats:
+            try:
+                cursor.execute(query)
+                success = True
+                break
+            except cx_Oracle.DatabaseError as e:
+                last_error = e
+                continue
+        
+        if not success:
+            # If all failed, raise the last error
+            raise last_error
+        
+        # Fetch all rows
+        rows = cursor.fetchall()
+        
+        # Create DataFrame
+        df = pd.DataFrame(rows, columns=column_names)
+        
+        return df
     
-    # Extract column names
-    column_names = [col[0] for col in columns]
-    
-    # Try different query formats - start with the simplest approach
-    query_formats = [
-        f'SELECT * FROM {schema_name}.{table_name}',
-        f'SELECT * FROM "{schema_name}"."{table_name}"',
-        f'SELECT * FROM {schema_name}."{table_name}"',
-        f'SELECT * FROM "{schema_name}".{table_name}',
-        f'SELECT * FROM {schema_name.upper()}.{table_name.upper()}',
-        f'SELECT * FROM {schema_name.lower()}.{table_name.lower()}'
-    ]
-    
-    # Try each query format until one works
-    success = False
-    last_error = None
-    
-    for query in query_formats:
-        try:
-            cursor.execute(query)
-            success = True
-            break
-        except cx_Oracle.DatabaseError as e:
-            last_error = e
-            continue
-    
-    if not success:
-        # If all failed, raise the last error
-        raise last_error
-    
-    # Fetch all rows
-    rows = cursor.fetchall()
-    
-    # Create DataFrame
-    df = pd.DataFrame(rows, columns=column_names)
-    
-    # Close cursor
-    cursor.close()
-    
-    return df
+    finally:
+        # Close cursor
+        cursor.close()
 
 
 def get_table_schema(connection: cx_Oracle.Connection, schema_name: str, table_name: str) -> Dict:
@@ -100,46 +103,49 @@ def get_table_schema(connection: cx_Oracle.Connection, schema_name: str, table_n
     """
     cursor = connection.cursor()
     
-    query = """
-    SELECT column_name, data_type, data_length, data_precision, data_scale, nullable
-    FROM all_tab_columns
-    WHERE owner = :schema AND table_name = :table
-    ORDER BY column_id
-    """
-    
-    cursor.execute(query, schema=schema_name.upper(), table=table_name.upper())
-    columns = cursor.fetchall()
-    
-    if not columns:
-        # Try with different case
-        cursor.execute(query, schema=schema_name, table=table_name)
+    try:
+        query = """
+        SELECT column_name, data_type, data_length, data_precision, data_scale, nullable
+        FROM all_tab_columns
+        WHERE owner = :schema AND table_name = :table
+        ORDER BY column_id
+        """
+        
+        cursor.execute(query, schema=schema_name.upper(), table=table_name.upper())
         columns = cursor.fetchall()
         
         if not columns:
-            raise ValueError(f"Table {schema_name}.{table_name} not found. Check schema and table names.")
-    
-    schema = {}
-    for col in columns:
-        col_name = col[0]
-        col_type = col[1]
-        length = col[2]
-        precision = col[3]
-        scale = col[4]
-        nullable = col[5]
+            # Try with different case
+            cursor.execute(query, schema=schema_name, table=table_name)
+            columns = cursor.fetchall()
+            
+            if not columns:
+                raise ValueError(f"Table {schema_name}.{table_name} not found. Check schema and table names.")
         
-        type_desc = col_type
-        if col_type == 'NUMBER' and precision is not None:
-            if scale == 0:
-                type_desc = f'NUMBER({precision})'
-            else:
-                type_desc = f'NUMBER({precision},{scale})'
-        elif col_type in ('VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR'):
-            type_desc = f'{col_type}({length})'
+        schema = {}
+        for col in columns:
+            col_name = col[0]
+            col_type = col[1]
+            length = col[2]
+            precision = col[3]
+            scale = col[4]
+            nullable = col[5]
+            
+            type_desc = col_type
+            if col_type == 'NUMBER' and precision is not None:
+                if scale == 0 or scale is None:
+                    type_desc = f'NUMBER({precision})'
+                else:
+                    type_desc = f'NUMBER({precision},{scale})'
+            elif col_type in ('VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR'):
+                type_desc = f'{col_type}({length})'
+            
+            schema[col_name] = {
+                'type': type_desc,
+                'nullable': nullable == 'Y'
+            }
         
-        schema[col_name] = {
-            'type': type_desc,
-            'nullable': nullable == 'Y'
-        }
+        return schema
     
-    cursor.close()
-    return schema
+    finally:
+        cursor.close()
