@@ -149,3 +149,8 @@ def get_table_schema(connection: cx_Oracle.Connection, schema_name: str, table_n
     
     finally:
         cursor.close()
+
+
+import logging
+logging.basicConfig(filename='application.log', level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.info('Application started')
