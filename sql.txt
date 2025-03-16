@@ -154,3 +154,8 @@ def get_table_schema(connection: cx_Oracle.Connection, schema_name: str, table_n
 import logging
 logging.basicConfig(filename='application.log', level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logging.info('Application started')
+
+
+if not hasattr(cx_Oracle, '_oracle_client_initialized') or not cx_Oracle._oracle_client_initialized:
+    cx_Oracle.init_oracle_client()
+    cx_Oracle._oracle_client_initialized = True
