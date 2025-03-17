@@ -150,6 +150,15 @@ def get_table_schema(connection: cx_Oracle.Connection, schema_name: str, table_n
     finally:
         cursor.close()
 
+COPY your_table_name
+FROM 's3://your-bucket-name/path/to/your-file.dat'
+IAM_ROLE 'arn:aws:iam::your-account-id:role/your-redshift-role'
+DELIMITER '|'
+ENCODING 'LATIN1'
+IGNOREHEADER 1
+REMOVEQUOTES
+TRIM
+DATEFORMAT 'DD-MON-YY';
 
 import logging
 logging.basicConfig(filename='application.log', level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
