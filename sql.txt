@@ -160,6 +160,60 @@ REMOVEQUOTES
 TRIM
 DATEFORMAT 'DD-MON-YY';
 
+
+
+--------
+
+-- Step 1: Create a temporary table with the same structure as your source data
+CREATE TEMP TABLE temp_import (
+    column1 VARCHAR(100),
+    column2 INTEGER,
+    column3 DATE,
+    -- Add all columns from your source data
+    -- Use appropriate data types
+);
+
+-- Step 2: COPY data from S3 into the temporary table
+COPY temp_import
+FROM 's3://your-bucket-name/path/to/your-file.dat'
+IAM_ROLE 'arn:aws:iam::your-account-id:role/your-redshift-role'
+DELIMITER '|'
+ENCODING 'LATIN1'
+IGNOREHEADER 1
+REMOVEQUOTES
+TRIM
+DATEFORMAT 'DD-MON-YY';
+
+-- Step 3: Insert from temporary table into stage table with additional columns
+INSERT INTO stage_table (
+    source_column1,
+    source_column2,
+    source_column3,
+    -- Original columns from source
+    
+    duplicated_column,  -- Column with same values as another column
+    null_column,        -- Column with all NULLs
+    audit_created_date, -- Audit column (NULL for now)
+    constant_column,    -- Column with constant value
+    another_null_column -- Another NULL column
+)
+SELECT
+    column1,
+    column2,
+    column3,
+    -- Original columns from source
+    
+    column2,           -- Duplicating values from column2
+    NULL,              -- Adding NULL column
+    NULL,              -- audit_created_date as NULL
+    'CONSTANT_VALUE',  -- Constant value
+    NULL               -- Another NULL column
+FROM temp_import;
+
+-- Optional: Drop the temporary table when done
+DROP TABLE temp_import;
+
+--------
 import logging
 logging.basicConfig(filename='application.log', level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logging.info('Application started')
