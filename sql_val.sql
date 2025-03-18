@@ -259,3 +259,19 @@ For each of these SQL commands, replace:
 - `{your_table}` with your table name
 
 These SQL commands implement equivalent functionality to the Python functions in your code, helping you analyze character sets, spaces, and VARCHAR compatibility directly in Redshift using DBeaver.
+
+
+-- Get distribution statistics in source
+SELECT 
+    MIN(LENGTH(column_name)) AS min_length,
+    MAX(LENGTH(column_name)) AS max_length,
+    AVG(LENGTH(column_name)) AS avg_length,
+    PERCENTILE_CONT(0.5) WITHIN GROUP(ORDER BY LENGTH(column_name)) AS median_length
+FROM table_name;
+
+-- Compare frequency distributions (run in both source and target)
+SELECT column_name, COUNT(*) AS frequency
+FROM table_name
+GROUP BY column_name
+ORDER BY frequency DESC
+LIMIT 10;
