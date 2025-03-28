@@ -228,10 +228,7 @@ if not hasattr(cx_Oracle, '_oracle_client_initialized') or not cx_Oracle._oracle
 
 
 
-
-
-
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
 def get_monthly_dates(start_date, end_date):
@@ -254,18 +251,17 @@ def get_monthly_dates(start_date, end_date):
         if month_end > end_date:
             month_end = end_date
             
-        # Format dates and add month name
-        month_name = current.strftime("%B")
+        # Format dates and create filename-friendly month-year string with full month name
+        month_year = current.strftime("%B_%Y").lower()  # e.g., january_2024
         start_formatted = current.strftime("%d-%b-%y")
         end_formatted = month_end.strftime("%d-%b-%y")
         
-        monthly_dates.append([month_name, start_formatted, end_formatted])
+        monthly_dates.append([month_year, start_formatted, end_formatted])
         current = next_month
     
     return monthly_dates
 
 # Example with your date range
-from datetime import timedelta
 dates = get_monthly_dates("2024-01-01", "2025-03-01")
 for month_data in dates:
     print(f"{month_data[0]}: {month_data[1]} to {month_data[2]}")
