@@ -222,3 +222,50 @@ logging.info('Application started')
 if not hasattr(cx_Oracle, '_oracle_client_initialized') or not cx_Oracle._oracle_client_initialized:
     cx_Oracle.init_oracle_client()
     cx_Oracle._oracle_client_initialized = True
+
+
+
+
+
+
+
+
+
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
+def get_monthly_dates(start_date, end_date):
+    # Convert strings to datetime if needed
+    if isinstance(start_date, str):
+        start_date = datetime.strptime(start_date, "%Y-%m-%d")
+    if isinstance(end_date, str):
+        end_date = datetime.strptime(end_date, "%Y-%m-%d")
+    
+    # Start from first day of the month
+    current = datetime(start_date.year, start_date.month, 1)
+    
+    monthly_dates = []
+    while current <= end_date:
+        # Get month end
+        next_month = current + relativedelta(months=1)
+        month_end = next_month - timedelta(days=1)
+        
+        # Adjust end date for final month
+        if month_end > end_date:
+            month_end = end_date
+            
+        # Format dates and add month name
+        month_name = current.strftime("%B")
+        start_formatted = current.strftime("%d-%b-%y")
+        end_formatted = month_end.strftime("%d-%b-%y")
+        
+        monthly_dates.append([month_name, start_formatted, end_formatted])
+        current = next_month
+    
+    return monthly_dates
+
+# Example with your date range
+from datetime import timedelta
+dates = get_monthly_dates("2024-01-01", "2025-03-01")
+for month_data in dates:
+    print(f"{month_data[0]}: {month_data[1]} to {month_data[2]}")
