@@ -265,3 +265,43 @@ def get_monthly_dates(start_date, end_date):
 dates = get_monthly_dates("2024-01-01", "2025-03-01")
 for month_data in dates:
     print(f"{month_data[0]}: {month_data[1]} to {month_data[2]}")
+
+
+
+
+
+
+# Install the required libraries
+# pip install pyqlikview pandas
+
+# Import libraries
+import pyqlikview as qv
+import pandas as pd
+
+# Read QVD file
+def qvd_to_dataframe(file_path):
+    """
+    Convert a QVD file to a pandas DataFrame
+    
+    Parameters:
+    file_path (str): Path to the QVD file
+    
+    Returns:
+    pandas.DataFrame: DataFrame containing the QVD data
+    """
+    # Load the QVD file
+    qvd = qv.QvdFile(file_path)
+    
+    # Convert to pandas DataFrame
+    df = qvd.to_dataframe()
+    
+    return df
+
+# Example usage
+file_path = "your_file.qvd"
+df = qvd_to_dataframe(file_path)
+
+# Now you can use all pandas functionality on your data
+print(df.head())
+print(df.info())
+print(df.describe())
