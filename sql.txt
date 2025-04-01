@@ -271,37 +271,13 @@ for month_data in dates:
 
 
 
-# Install the required libraries
-# pip install pyqlikview pandas
+from pyqvd import QvdTable
 
-# Import libraries
-import pyqlikview as qv
-import pandas as pd
+# Load the QVD file
+tbl = QvdTable.from_qvd("path/to/file.qvd")
 
-# Read QVD file
-def qvd_to_dataframe(file_path):
-    """
-    Convert a QVD file to a pandas DataFrame
-    
-    Parameters:
-    file_path (str): Path to the QVD file
-    
-    Returns:
-    pandas.DataFrame: DataFrame containing the QVD data
-    """
-    # Load the QVD file
-    qvd = qv.QvdFile(file_path)
-    
-    # Convert to pandas DataFrame
-    df = qvd.to_dataframe()
-    
-    return df
+# Convert to pandas DataFrame for analysis
+df = tbl.to_pandas()
 
-# Example usage
-file_path = "your_file.qvd"
-df = qvd_to_dataframe(file_path)
-
-# Now you can use all pandas functionality on your data
+# Display the DataFrame
 print(df.head())
-print(df.info())
-print(df.describe())
