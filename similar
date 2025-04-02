@@ -1,0 +1,43 @@
+import pandas as pd
+import numpy as np
+
+def find_differing_columns(df, row_indices=None):
+    """
+    Identify columns where rows differ from one another.
+    
+    Parameters:
+    - df: The pandas DataFrame to analyze
+    - row_indices: Specific row indices to compare (optional)
+                  If None, will compare all rows
+    
+    Returns:
+    - Dictionary mapping column names to sets of unique values
+    """
+    if row_indices is None:
+        # Use all rows if not specified
+        row_indices = df.index.tolist()
+    
+    # Extract the subset of rows
+    subset = df.loc[row_indices]
+    
+    # Find columns with differences
+    diff_columns = {}
+    
+    for col in df.columns:
+        unique_values = subset[col].unique()
+        # Only include columns with more than one unique value
+        if len(unique_values) > 1:
+            diff_columns[col] = set(unique_values)
+    
+    return diff_columns
+
+
+
+
+    # Example: Compare rows 2 and 5 which appear similar
+similar_rows = [2, 5]
+differences = find_differing_columns(df, similar_rows)
+
+print("Columns where rows differ:")
+for col, values in differences.items():
+    print(f"- {col}: {values}")
