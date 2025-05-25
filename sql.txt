@@ -475,3 +475,50 @@ Don’t Ignore Partition Key Restrictions: Partition key types are immutable—d
 Don’t Forget to Redefine All Columns (LazySimpleSerDe): When using ALTER TABLE REPLACE COLUMNS, you must redefine all columns you want to keep, or they will be dropped.
 
 Don’t Rely Solely on Crawlers for Schema Correction: Glue Crawlers may infer incorrect types if data is inconsistent; pre-process data and define schemas explicitly when possible to avoid mismatches
+
+
+Addition and deletion of columns in AWS Glue and Athena are supported, but how they affect compatibility depends on your data format and how you manage schema evolution.
+
+Adding Columns
+Column Addition is Generally Backward Compatible:
+
+For columnar formats like Parquet and ORC, adding new columns to the schema is usually safe. Older data files will not have the new columns, so Athena returns NULLs for those columns when querying older partitions or files.
+
+For text formats (CSV, TSV), adding columns at the end of the schema is supported, but older files will not have those columns, resulting in NULLs for those columns in queries.
+
+Ensure that new data files include the new columns in the correct order to avoid misalignment.
+
+Deleting Columns
+Column Deletion Can Break Forward Compatibility:
+
+Removing columns from the schema means queries expecting those columns will fail or return errors when reading older data files that still contain the dropped columns.
+
+For Parquet/ORC, Athena can handle missing columns by returning NULLs, but for CSV/TSV, removing columns from the middle can cause misalignment and query errors.
+
+If you must delete a column, ensure all data files and partitions are updated to match the new schema, or expect NULLs in place of the removed column.
+
+Partitioned Tables and Schema Mismatch
+Partition Schema Compatibility:
+
+Athena requires that each partition's schema is compatible with the table's schema. If a partition has a different number of columns, order, or types, Athena may fail with HIVE_PARTITION_SCHEMA_MISMATCH.
+
+When adding or removing columns, ensure that all partitions are updated or re-crawled so their schemas remain compatible with the table schema.
+
+Best Practices: Do's and Don'ts
+Do:
+
+Add new columns at the end of the schema for text formats.
+
+Ensure new data files match the updated schema.
+
+Use Glue Crawlers or manual schema updates to keep the Glue Catalog in sync with your data.
+
+Test queries after schema changes to ensure compatibility.
+
+For partitioned tables, update or re-crawl partitions after schema changes to avoid mismatches.
+
+Don't:
+
+Do not remove columns from the middle of the schema for CSV/TSV files—this causes column misalignment and query errors.
+
+Do not assume that deleting columns is always safe; always check for legacy data files or partitions that may still contain the old columns
