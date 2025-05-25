@@ -296,3 +296,133 @@ print(df.head())
     )
     """
     return query
+
+
+def create_glue_partition_expression(partition_filters, max_length=2048):
+    """
+    Creates a Glue partition expression from partition filters.
+    
+    Args:
+        partition_filters (dict): Dictionary with partition keys as keys and lists of values as values
+                                 Example: {"year": [2023, 2024], "region": ["us-east-1", "us-west-2"]}
+        max_length (int): Maximum length of the expression (default: 2048)
+    
+    Returns:
+        str: Partition expression string, or empty string if no valid filters
+    """
+    
+    def format_value(value):
+        """Format a value based on its type for SQL expression"""
+        if isinstance(value, str):
+            # Escape single quotes in strings and wrap in quotes
+            escaped_value = value.replace("'", "''")
+            return f"'{escaped_value}'"
+        elif isinstance(value, (int, float)):
+            # Numbers don't need quotes
+            return str(value)
+        elif isinstance(value, bool):
+            # Convert boolean to string
+            return str(value).lower()
+        else:
+            # Default to string representation with quotes
+            escaped_value = str(value).replace("'", "''")
+            return f"'{escaped_value}'"
+    
+    def create_condition(key, values):
+        """Create a condition for a single partition key"""
+        if not values:
+            return ""
+        
+        # Remove duplicates while preserving order
+        unique_values = list(dict.fromkeys(values))
+        formatted_values = [format_value(v) for v in unique_values]
+        
+        if len(formatted_values) == 1:
+            return f"{key} = {formatted_values[0]}"
+        else:
+            values_str = ", ".join(formatted_values)
+            return f"{key} IN ({values_str})"
+    
+    if not partition_filters:
+        return ""
+    
+    conditions = []
+    current_length = 0
+    
+    # Sort partition keys for consistent output
+    sorted_keys = sorted(partition_filters.keys())
+    
+    for key in sorted_keys:
+        values = partition_filters[key]
+        
+        if not values:  # Skip empty value lists
+            continue
+            
+        condition = create_condition(key, values)
+        if not condition:
+            continue
+        
+        # Calculate the length if we add this condition
+        if conditions:
+            # Account for " AND " separator
+            test_length = current_length + len(" AND ") + len(condition)
+        else:
+            test_length = len(condition)
+        
+        # Check if adding this condition would exceed the limit
+        if test_length > max_length:
+            print(f"Warning: Skipping partition key '{key}' - would exceed {max_length} character limit")
+            break
+        
+        conditions.append(condition)
+        current_length = test_length
+    
+    if not conditions:
+        return ""
+    
+    expression = " AND ".join(conditions)
+    
+    # Final safety check
+    if len(expression) > max_length:
+        print(f"Warning: Expression length ({len(expression)}) exceeds limit ({max_length})")
+        return ""
+    
+    return expression
+
+
+# Example usage and test cases
+if __name__ == "__main__":
+    # Test with different data types
+    test_filters_1 = {
+        "year": [2023, 2024],
+        "month": ["01", "02", "03"],
+        "region": ["us-east-1", "us-west-2"]
+    }
+    
+    test_filters_2 = {
+        "date": ["2024-01-01"],
+        "active": [True, False],
+        "score": [95.5, 87.2]
+    }
+    
+    # Test with very long values to trigger length limit
+    test_filters_long = {
+        "very_long_partition": ["very_long_value_" + "x" * 100 + str(i) for i in range(50)]
+    }
+    
+    print("Test 1:")
+    expr1 = create_glue_partition_expression(test_filters_1)
+    print(f"Expression: {expr1}")
+    print(f"Length: {len(expr1)}")
+    print()
+    
+    print("Test 2:")
+    expr2 = create_glue_partition_expression(test_filters_2)
+    print(f"Expression: {expr2}")
+    print(f"Length: {len(expr2)}")
+    print()
+    
+    print("Test 3 (Length limit test):")
+    expr3 = create_glue_partition_expression(test_filters_long)
+    print(f"Expression: {expr3}")
+    print(f"Length: {len(expr3)}")
