@@ -522,3 +522,28 @@ Don't:
 Do not remove columns from the middle of the schema for CSV/TSV files—this causes column misalignment and query errors.
 
 Do not assume that deleting columns is always safe; always check for legacy data files or partitions that may still contain the old columns
+
+++
+
+Test schema changes in a development environment first
+Validate that existing queries still work after adding the column
+Verify that both old and new data can be queried seamlessly
+
+DON'Ts:
+Avoid Breaking Changes:
+
+Don't modify existing column names, types, or positions
+Don't add non-nullable columns without providing defaults
+Don't update all historical data at once without testing
+
+Schema Pitfalls:
+
+Don't rely on Glue's automatic schema detection for production changes
+Don't forget to update downstream applications/queries that might be affected
+Don't add columns with complex nested types without careful consideration
+
+Expected Behaviors:
+
+Athena will return null for the new column when querying historical data (unless you backfill)
+Partitioned tables may show the new column only in newer partitions
+Query performance should remain largely unaffected for existing queries
