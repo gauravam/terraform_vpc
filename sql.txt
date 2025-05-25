@@ -445,3 +445,7 @@ If needed, migrate or reorganize your data in S3 to match the new partition stru
     expr3 = create_glue_partition_expression(test_filters_long)
     print(f"Expression: {expr3}")
     print(f"Length: {len(expr3)}")
+
+You cannot change the datatype of partition keys in an existing AWS Glue Catalog table. Partition key names, types, and order are immutable after table creation—this restriction is enforced by AWS Glue and applies regardless of how you update the table or partitions. If you need to use a different datatype for a partition key, you must create a new table with the desired partition key definitions and migrate your data accordingly.
+
+Attempting to alter the datatype of an existing partition key will break compatibility with both Glue and Athena queries, as the partitioning scheme is fundamental to how data is stored and queried
