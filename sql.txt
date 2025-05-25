@@ -281,3 +281,18 @@ df = tbl.to_pandas()
 
 # Display the DataFrame
 print(df.head())
+
+
+    partition_array = "ARRAY[{}]".format(
+        ', '.join([f"'{col}'" for col in partition_columns])
+    )
+    
+    query = f"""
+    UNLOAD (SELECT * FROM {table_name})
+    TO '{s3_path}'
+    WITH (
+        format = '{file_format}',
+        partitioned_by = {partition_array}
+    )
+    """
+    return query
