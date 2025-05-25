@@ -421,6 +421,25 @@ if __name__ == "__main__":
     print(f"Expression: {expr2}")
     print(f"Length: {len(expr2)}")
     print()
+
+
+Directly changing partition keys of an existing table in the AWS Glue Data Catalog is not supported. Once a table is created with specific partition keys, those keys define how data is organized and queried in both Glue and Athena. Here’s what you need to know:
+
+Key Points
+Partition keys are defined at table creation and are used to organize data in S3 and optimize queries in Athena and Glue.
+
+You cannot change partition keys for an existing table directly. To use different partition keys, you must create a new table with the desired partitioning scheme.
+
+When uploading new data or running ETL jobs, you can specify partition keys, but this only affects new tables or new partitions within the existing key structure—not the partition key definition itself.
+
+Workarounds and Best Practices
+To change partitioning:
+
+Create a new Glue table with the desired partition keys and point it to the appropriate S3 location.
+
+Update your ETL jobs to write data using the new partition key structure.
+
+If needed, migrate or reorganize your data in S3 to match the new partition structure.
     
     print("Test 3 (Length limit test):")
     expr3 = create_glue_partition_expression(test_filters_long)
