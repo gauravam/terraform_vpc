@@ -449,3 +449,29 @@ If needed, migrate or reorganize your data in S3 to match the new partition stru
 You cannot change the datatype of partition keys in an existing AWS Glue Catalog table. Partition key names, types, and order are immutable after table creation—this restriction is enforced by AWS Glue and applies regardless of how you update the table or partitions. If you need to use a different datatype for a partition key, you must create a new table with the desired partition key definitions and migrate your data accordingly.
 
 Attempting to alter the datatype of an existing partition key will break compatibility with both Glue and Athena queries, as the partitioning scheme is fundamental to how data is stored and queried
+
+
+Do's and Don'ts When Changing Column Data Types in Glue or Athena (with Parquet Files)
+Do's:
+
+Test Schema Changes First: Always test your queries after changing column data types to ensure Athena can read and cast the data correctly. Incompatible types may cause query failures or unexpected NULLs.
+
+Check Data Compatibility: Only change a column’s type if the new type is compatible with the physical type in the Parquet files (e.g., INT64 to DOUBLE is generally safe, but STRING to INT is risky unless all values are valid integers).
+
+Use ETL for True Type Changes: If you need to truly change the underlying data type (e.g., from string to int), rewrite your Parquet files using an ETL job or data processing tool to ensure the physical data matches the new schema.
+
+Leverage Partition Casting (if needed): For partitioned Parquet/ORC tables, Athena can sometimes cast partition column types between partitions, but this should be tested carefully to avoid schema mismatch errors.
+
+Use ALTER TABLE REPLACE COLUMNS (for LazySimpleSerDe): If your table uses the LazySimpleSerDe, you can redefine columns and their types using ALTER TABLE REPLACE COLUMNS, but you must specify all columns you want to keep, not just the ones you want to change.
+
+Don'ts:
+
+Don’t Assume Glue/Athena Changes Affect S3 Data: Changing column types in Glue or Athena only updates the table metadata, not the actual Parquet files in S3. The underlying data remains unchanged.
+
+Don’t Change to Incompatible Types: Avoid changing a column to a type that is not compatible with the data in the Parquet files, as this will cause errors or NULLs during query execution.
+
+Don’t Ignore Partition Key Restrictions: Partition key types are immutable—do not attempt to change their data type; create a new table if a different partition key type is needed.
+
+Don’t Forget to Redefine All Columns (LazySimpleSerDe): When using ALTER TABLE REPLACE COLUMNS, you must redefine all columns you want to keep, or they will be dropped.
+
+Don’t Rely Solely on Crawlers for Schema Correction: Glue Crawlers may infer incorrect types if data is inconsistent; pre-process data and define schemas explicitly when possible to avoid mismatches
