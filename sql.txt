@@ -221,6 +221,17 @@ logging.info('Application started')
 
 if not hasattr(cx_Oracle, '_oracle_client_initialized') or not cx_Oracle._oracle_client_initialized:
     cx_Oracle.init_oracle_client()
+
+
+Concurrent Queries: 20 per account/region (default)
+What happens when hit: New queries get queued or return TooManyRequestsException
+Other key limits:
+
+30 min max execution time
+4 concurrent Spark sessions
+100 databases per account
+
+Solution: Request limit increase through AWS Support (can go up to 50-100+)
     cx_Oracle._oracle_client_initialized = True
 
 
