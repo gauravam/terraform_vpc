@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWS Glue Save Modes - S3 Table Visualization</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 25px 80px rgba(0,0,0,0.2);
+            padding: 40px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        .header h1 {
+            font-size: 3em;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+            font-weight: 800;
+        }
+
+        .header .subtitle {
+            font-size: 1.3em;
+            color: #6c757d;
+            font-weight: 300;
+        }
+
+        .scenario-section {
+            margin-bottom: 60px;
+            padding: 30px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+        }
+
+        .scenario-title {
+            font-size: 2em;
+            font-weight: 700;
+            margin-bottom: 30px;
+            text-align: center;
+            padding: 15px 0;
+            border-radius: 10px;
+            color: white;
+        }
+
+        .append-title { background: linear-gradient(135deg, #3498db, #2980b9); }
+        .overwrite-title { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+        .dynamic-title { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+
+        .s3-structure {
+            display: flex;
+            justify-content: space-around;
+            align-items: flex-start;
+            gap: 30px;
+            margin: 30px 0;
+            flex-wrap: wrap;
+        }
+
+        .s3-bucket {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            border: 3px solid #e9ecef;
+            min-width: 280px;
+            flex: 1;
+            max-width: 400px;
+        }
+
+        .bucket-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #f1f3f4;
+            border-radius: 8px;
+        }
+
+        .bucket-icon {
+            width: 40px;
+            height: 40px;
+            background: #ff9800;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 15px;
+            font-weight: bold;
+            color: white;
+        }
+
+        .bucket-name {
+            font-weight: 600;
+            font-size: 1.1em;
+            color: #333;
+        }
+
+        .folder-structure {
+            margin-left: 0;
+        }
+
+        .folder, .file {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px;
+            margin: 5px 0;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .folder {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+        }
+
+        .file {
+            background: #f3e5f5;
+            border-left: 4px solid #9c27b0;
+            margin-left: 20px;
+        }
+
+        .folder:hover, .file:hover {
+            transform: translateX(5px);
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        .folder-icon, .file-icon {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+        }
+
+        .folder-icon {
+            background: #2196f3;
+        }
+
+        .file-icon {
+            background: #9c27b0;
+        }
+
+        .new-data {
+            background: #c8e6c9 !important;
+            border-left-color: #4caf50 !important;
+            animation: pulse 2s infinite;
+        }
+
+        .updated-data {
+            background: #fff3e0 !important;
+            border-left-color: #ff9800 !important;
+            animation: pulse 2s infinite;
+        }
+
+        .deleted-data {
+            background: #ffcdd2 !important;
+            border-left-color: #f44336 !important;
+            opacity: 0.5;
+            text-decoration: line-through;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1); }
+        }
+
+        .arrow-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .arrow {
+            font-size: 3em;
+            color: #6c757d;
+            animation: bounce 2s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% { transform: translateX(0); }
+            40% { transform: translateX(-10px); }
+            60% { transform: translateX(-5px); }
+        }
+
+        .table-preview {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .table-title {
+            font-weight: 600;
+            font-size: 1.1em;
+            margin-bottom: 15px;
+            color: #495057;
+            text-align: center;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+        }
+
+        .data-table th {
+            background: #343a40;
+            color: white;
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            border-radius: 4px 4px 0 0;
+        }
+
+        .data-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .data-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .new-row {
+            background: #d4edda !important;
+            border-left: 4px solid #28a745;
+        }
+
+        .updated-row {
+            background: #fff3cd !important;
+            border-left: 4px solid #ffc107;
+        }
+
+        .code-block {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            overflow-x: auto;
+            margin: 20px 0;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .highlight {
+            background: #ffd54f;
+            color: #333;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin: 30px 0;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 15px;
+            border-radius: 20px;
+            background: white;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+        }
+
+        .new-color { background: #4caf50; }
+        .updated-color { background: #ff9800; }
+        .deleted-color { background: #f44336; }
+
+        .partition-info {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 4px solid #4caf50;
+        }
+
+        .partition-info h4 {
+            color: #2e7d32;
+            margin-bottom: 8px;
+        }
+
+        .metadata {
+            font-size: 0.85em;
+            color: #6c757d;
+            font-style: italic;
+        }
+
+        .schema-info {
+            background: #f0f8ff;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            border-left: 4px solid #2196f3;
+        }
+
+        .schema-info h4 {
+            color: #1976d2;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>AWS Glue Save Modes</h1>
+            <p class="subtitle">Complete S3 Table Structure & Data Flow Visualization</p>
+        </div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color new-color"></div>
+                <span>New Data</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color updated-color"></div>
+                <span>Updated Data</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color deleted-color"></div>
+                <span>Deleted Data</span>
+            </div>
+        </div>
+
+        <!-- APPEND MODE SECTION -->
+        <div class="scenario-section">
+            <div class="scenario-title append-title">
+                📊 APPEND MODE - Incremental Data Addition
+            </div>
+
+            <div class="s3-structure">
+                <!-- Before State -->
+                <div class="s3-bucket">
+                    <div class="bucket-header">
+                        <div class="bucket-icon">S3</div>
+                        <div>
+                            <div class="bucket-name">s3://aws-financial-datalake/trading/</div>
+                            <div class="metadata">BEFORE - Existing Data</div>
+                        </div>
+                    </div>
+                    <div class="folder-structure">
+                        <div class="folder">
+                            <div class="folder-icon">📁</div>
+                            <span>year=2024/</span>
+                        </div>
+                        <div class="folder" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=01/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (2.1MB)</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00002.parquet (1.8MB)</span>
+                        </div>
+                        <div class="folder" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=02/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (2.3MB)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="arrow-container">
+                    <div class="arrow">→</div>
+                </div>
+
+                <!-- After State -->
+                <div class="s3-bucket">
+                    <div class="bucket-header">
+                        <div class="bucket-icon">S3</div>
+                        <div>
+                            <div class="bucket-name">s3://aws-financial-datalake/trading/</div>
+                            <div class="metadata">AFTER - Data Appended</div>
+                        </div>
+                    </div>
+                    <div class="folder-structure">
+                        <div class="folder">
+                            <div class="folder-icon">📁</div>
+                            <span>year=2024/</span>
+                        </div>
+                        <div class="folder" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=01/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (2.1MB)</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00002.parquet (1.8MB)</span>
+                        </div>
+                        <div class="file new-data">
+                            <div class="file-icon">📄</div>
+                            <span>part-00003.parquet (1.5MB) ✨</span>
+                        </div>
+                        <div class="folder" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=02/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (2.3MB)</span>
+                        </div>
+                        <div class="folder new-data" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=03/ ✨</span>
+                        </div>
+                        <div class="file new-data">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (2.0MB) ✨</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="table-preview">
+                <div class="table-title">🏢 AWS Glue Data Catalog - financial_analytics_db.trading_transactions</div>
+                <div class="schema-info">
+                    <h4>📋 Table Schema & Metadata</h4>
+                    <p><strong>Database:</strong> financial_analytics_db | <strong>Table:</strong> trading_transactions | <strong>Format:</strong> Parquet</p>
+                    <p><strong>Location:</strong> s3://aws-financial-datalake/trading/ | <strong>Partitioned:</strong> Yes (trade_date, market_segment)</p>
+                    <p><strong>SerDe:</strong> org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe | <strong>Compliance:</strong> SOX, GDPR</p>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>trade_id</th>
+                            <th>client_account_id</th>
+                            <th>security_symbol</th>
+                            <th>trade_value_usd</th>
+                            <th>execution_timestamp</th>
+                            <th>market_segment</th>
+                            <th>settlement_status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>TRD_2024_Q1_001001</td>
+                            <td>INST_CLI_JPM_78291</td>
+                            <td>AAPL</td>
+                            <td>2,450,750.00</td>
+                            <td>2024-01-15T09:30:05.342Z</td>
+                            <td>NYSE_EQUITY</td>
+                            <td>SETTLED</td>
+                        </tr>
+                        <tr>
+                            <td>TRD_2024_Q1_001002</td>
+                            <td>HF_CLI_BLK_45182</td>
+                            <td>MSFT</td>
+                            <td>5,987,230.00</td>
+                            <td>2024-02-10T14:22:18.756Z</td>
+                            <td>NASDAQ_EQUITY</td>
+                            <td>SETTLED</td>
+                        </tr>
+                        <tr class="new-row">
+                            <td>TRD_2024_Q1_001003</td>
+                            <td>PENSION_CLI_STT_91045</td>
+                            <td>TSLA</td>
+                            <td>12,459,820.00</td>
+                            <td>2024-03-05T11:45:33.124Z</td>
+                            <td>NASDAQ_EQUITY</td>
+                            <td>PENDING_SETTLEMENT</td>
+                        </tr>
+                        <tr class="new-row">
+                            <td>TRD_2024_Q1_001004</td>
+                            <td>SOVEREIGN_CLI_NOR_33847</td>
+                            <td>SPY</td>
+                            <td>25,213,450.00</td>
+                            <td>2024-03-12T15:58:42.891Z</td>
+                            <td>NYSE_ETF</td>
+                            <td>TRADE_CONFIRMATION</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="partition-info">
+                    <h4>📂 Partition Information</h4>
+                    <p><strong>New Partitions Added:</strong> trade_date=2024-03-01/market_segment=NASDAQ_EQUITY/, trade_date=2024-03-12/market_segment=NYSE_ETF/</p>
+                    <p><strong>Records Added:</strong> 15,847 new trades | <strong>Total Value:</strong> $847.2M | <strong>Storage Added:</strong> 12.8MB</p>
+                    <p><strong>Regulatory Compliance:</strong> All trades automatically flagged for T+2 settlement monitoring</p>
+                </div>
+            </div>
+
+            <div class="code-block">
+<span class="highlight"># AWS Glue Append Mode - Financial Trading Implementation</span>
+import boto3
+from awsglue.context import GlueContext
+from awsglue.dynamicframe import DynamicFrame
+
+# Initialize AWS Glue Context for Financial Services
+glueContext = GlueContext(SparkContext.getOrCreate())
+
+# Write to AWS S3 Financial Data Lake with Append Mode
+glueContext.write_dynamic_frame.from_options(
+    frame = trading_transactions_dynamic_frame,
+    connection_type = "s3",
+    connection_options = {
+        "path": "s3://aws-financial-datalake/trading/",
+        "partitionKeys": ["trade_date", "market_segment"]
+    },
+    format = "glueparquet",
+    format_options = {
+        "compression": "snappy",
+        "enableUpdateCatalog": True,
+        "updateBehavior": "UPDATE_IN_DATABASE"
+    },
+    <span class="highlight">transformation_ctx = "financial_trading_append_sink"</span>
+)
+
+<span class="highlight"># Financial Compliance & Audit Trail</span>
+# Database: financial_analytics_db.trading_transactions
+# Compliance: SOX Section 404, GDPR Article 25
+# Audit: T+2 settlement tracking, MiFID II transaction reporting
+# Result: Zero trade data loss, immutable audit trail ✅
+# Risk: Market data integrity maintained for regulatory reporting
+            </div>ue.dynamicframe import DynamicFrame
+
+# Initialize AWS Glue Context
+glueContext = GlueContext(SparkContext.getOrCreate())
+
+# Write to AWS S3 Data Lake with Append Mode
+glueContext.write_dynamic_frame.from_options(
+    frame = sales_transactions_dynamic_frame,
+    connection_type = "s3",
+    connection_options = {
+        "path": "s3://aws-enterprise-datalake/sales/",
+        "partitionKeys": ["year", "month"]
+    },
+    format = "glueparquet",
+    format_options = {
+        "compression": "snappy",
+        "enableUpdateCatalog": True,
+        "updateBehavior": "UPDATE_IN_DATABASE"
+    },
+    <span class="highlight">transformation_ctx = "enterprise_sales_append_sink"</span>
+)
+
+<span class="highlight"># AWS Glue Data Catalog Integration</span>
+# Automatically updates: enterprise_sales_db.sales_transactions
+# Partition Discovery: Enabled for new year/month combinations
+# Schema Evolution: Backward compatible changes supported
+# Result: Zero data loss, incremental storage growth ✅
+            </div>
+        </div>
+
+        <!-- OVERWRITE MODE SECTION -->
+        <div class="scenario-section">
+            <div class="scenario-title overwrite-title">
+                🔄 OVERWRITE MODE - Complete Data Replacement
+            </div>
+
+            <div class="s3-structure">
+                <!-- Before State -->
+                <div class="s3-bucket">
+                    <div class="bucket-header">
+                        <div class="bucket-icon">S3</div>
+                        <div>
+                            <div class="bucket-name">s3://aws-financial-datalake/positions/</div>
+                            <div class="metadata">BEFORE - Existing Data</div>
+                        </div>
+                    </div>
+                    <div class="folder-structure">
+                        <div class="folder">
+                            <div class="folder-icon">📁</div>
+                            <span>category=electronics/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (3.2MB)</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00002.parquet (2.8MB)</span>
+                        </div>
+                        <div class="folder">
+                            <div class="folder-icon">📁</div>
+                            <span>category=clothing/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (1.9MB)</span>
+                        </div>
+                        <div class="folder">
+                            <div class="folder-icon">📁</div>
+                            <span>category=books/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (1.1MB)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="arrow-container">
+                    <div class="arrow">→</div>
+                </div>
+
+                <!-- After State -->
+                <div class="s3-bucket">
+                    <div class="bucket-header">
+                        <div class="bucket-icon">S3</div>
+                        <div>
+                            <div class="bucket-name">s3://aws-financial-datalake/positions/</div>
+                            <div class="metadata">AFTER - Data Overwritten</div>
+                        </div>
+                    </div>
+                    <div class="folder-structure">
+                        <div class="folder deleted-data">
+                            <div class="folder-icon">📁</div>
+                            <span>category=electronics/ ❌</span>
+                        </div>
+                        <div class="file deleted-data">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (3.2MB) ❌</span>
+                        </div>
+                        <div class="file deleted-data">
+                            <div class="file-icon">📄</div>
+                            <span>part-00002.parquet (2.8MB) ❌</span>
+                        </div>
+                        <div class="folder new-data">
+                            <div class="folder-icon">📁</div>
+                            <span>category=smartphones/ ✨</span>
+                        </div>
+                        <div class="file new-data">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (4.1MB) ✨</span>
+                        </div>
+                        <div class="folder new-data">
+                            <div class="folder-icon">📁</div>
+                            <span>category=laptops/ ✨</span>
+                        </div>
+                        <div class="file new-data">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (3.5MB) ✨</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="table-preview">
+                <div class="table-title">🏢 AWS Glue Data Catalog - risk_management_db.portfolio_positions</div>
+                <div class="schema-info">
+                    <h4>📋 Table Schema & Metadata</h4>
+                    <p><strong>Database:</strong> risk_management_db | <strong>Table:</strong> portfolio_positions | <strong>Format:</strong> Parquet</p>
+                    <p><strong>Location:</strong> s3://aws-financial-datalake/positions/ | <strong>Partitioned:</strong> Yes (asset_class, reporting_date)</p>
+                    <p><strong>SerDe:</strong> org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe | <strong>Compliance:</strong> Basel III, Dodd-Frank</p>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>position_id</th>
+                            <th>fund_identifier</th>
+                            <th>security_isin</th>
+                            <th>market_value_usd</th>
+                            <th>risk_weight_pct</th>
+                            <th>asset_class</th>
+                            <th>valuation_status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr style="background: #ffcdd2; text-decoration: line-through; opacity: 0.6;">
+                            <td>POS_EQUITY_001</td>
+                            <td>FUND_GROWTH_ALPHA</td>
+                            <td>US0378331005</td>
+                            <td>45,750,000.00</td>
+                            <td>12.50</td>
+                            <td>equity_large_cap</td>
+                            <td>MARKED_TO_MARKET</td>
+                        </tr>
+                        <tr style="background: #ffcdd2; text-decoration: line-through; opacity: 0.6;">
+                            <td>POS_BOND_001</td>
+                            <td>FUND_FIXED_INCOME</td>
+                            <td>US912828XM81</td>
+                            <td>125,000,000.00</td>
+                            <td>8.75</td>
+                            <td>government_bonds</td>
+                            <td>MARKED_TO_MARKET</td>
+                        </tr>
+                        <tr class="new-row">
+                            <td>POS_CRYPTO_001</td>
+                            <td>FUND_DIGITAL_ASSETS</td>
+                            <td>BTC-USD-SPOT</td>
+                            <td>89,250,000.00</td>
+                            <td>25.00</td>
+                            <td>cryptocurrency</td>
+                            <td>FAIR_VALUE_ESTIMATE</td>
+                        </tr>
+                        <tr class="new-row">
+                            <td>POS_DERIV_001</td>
+                            <td>FUND_SYSTEMATIC_HEDGE</td>
+                            <td>SPX240315C04200000</td>
+                            <td>67,450,000.00</td>
+                            <td>18.30</td>
+                            <td>derivatives_options</td>
+                            <td>MODEL_PRICE</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="partition-info">
+                    <h4>⚠️ Complete Portfolio Restructuring</h4>
+                    <p><strong>Partitions Deleted:</strong> equity_large_cap/, government_bonds/, corporate_bonds/</p>
+                    <p><strong>New Asset Classes:</strong> cryptocurrency/, derivatives_options/</p>
+                    <p><strong>Portfolio Impact:</strong> $170.75M legacy positions liquidated, $156.7M new positions established</p>
+                    <p><strong>Risk Adjustment:</strong> VaR calculation model updated for new asset classes</p>
+                </div>
+            </div>
+
+            <div class="code-block">
+<span class="highlight"># AWS Glue Overwrite Mode - Enterprise Implementation</span>
+import boto3
+from awsglue.context import GlueContext
+from awsglue.dynamicframe import DynamicFrame
+
+# Initialize AWS Glue Context with Enterprise Configuration
+glueContext = GlueContext(SparkContext.getOrCreate())
+
+# Complete Data Replacement with Overwrite Mode
+glueContext.write_dynamic_frame.from_options(
+    frame = product_inventory_dynamic_frame,
+    connection_type = "s3",
+    connection_options = {
+        "path": "s3://aws-enterprise-datalake/products/",
+        "partitionKeys": ["product_category"]
+    },
+    format = "glueparquet",
+    format_options = {
+        "compression": "snappy",
+        <span class="highlight">"writeMode": "overwrite",</span>
+        "enableUpdateCatalog": True,
+        "updateBehavior": "UPDATE_IN_DATABASE"
+    },
+    transformation_ctx = "enterprise_product_overwrite_sink"
+)
+
+<span class="highlight"># AWS Data Catalog Complete Refresh</span>
+# Database: enterprise_product_db.product_inventory
+# Action: Complete table recreation with new schema
+# Partitions: All existing partitions deleted, new ones created
+# Result: Historical data permanently removed ⚠️
+# Use Case: Major product catalog restructuring
+            </div>
+        </div>
+
+        <!-- DYNAMIC SAVE MODE SECTION -->
+        <div class="scenario-section">
+            <div class="scenario-title dynamic-title">
+                ⚡ DYNAMIC SAVE MODE - Intelligent Partition Updates
+            </div>
+
+            <div class="s3-structure">
+                <!-- Before State -->
+                <div class="s3-bucket">
+                    <div class="bucket-header">
+                        <div class="bucket-icon">S3</div>
+                        <div>
+                            <div class="bucket-name">s3://aws-financial-datalake/regulatory/</div>
+                            <div class="metadata">BEFORE - Partitioned Data</div>
+                        </div>
+                    </div>
+                    <div class="folder-structure">
+                        <div class="folder">
+                            <div class="folder-icon">📁</div>
+                            <span>year=2024/</span>
+                        </div>
+                        <div class="folder" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=01/region=us-east/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (1.8MB)</span>
+                        </div>
+                        <div class="folder" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=01/region=us-west/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (1.5MB)</span>
+                        </div>
+                        <div class="folder" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=02/region=us-east/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (2.1MB)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="arrow-container">
+                    <div class="arrow">→</div>
+                </div>
+
+                <!-- After State -->
+                <div class="s3-bucket">
+                    <div class="bucket-header">
+                        <div class="bucket-icon">S3</div>
+                        <div>
+                            <div class="bucket-name">s3://aws-financial-datalake/regulatory/</div>
+                            <div class="metadata">AFTER - Selective Updates</div>
+                        </div>
+                    </div>
+                    <div class="folder-structure">
+                        <div class="folder">
+                            <div class="folder-icon">📁</div>
+                            <span>year=2024/</span>
+                        </div>
+                        <div class="folder" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=01/region=us-east/</span>
+                        </div>
+                        <div class="file updated-data">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (2.0MB) 🔄</span>
+                        </div>
+                        <div class="folder" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=01/region=us-west/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (1.5MB)</span>
+                        </div>
+                        <div class="folder" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=02/region=us-east/</span>
+                        </div>
+                        <div class="file">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (2.1MB)</span>
+                        </div>
+                        <div class="folder new-data" style="margin-left: 20px;">
+                            <div class="folder-icon">📁</div>
+                            <span>month=03/region=us-central/ ✨</span>
+                        </div>
+                        <div class="file new-data">
+                            <div class="file-icon">📄</div>
+                            <span>part-00001.parquet (1.9MB) ✨</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="partition-info">
+                <h4>🎯 Partition Strategy</h4>
+                <p><strong>Partition Keys:</strong> year, month, region</p>
+                <p><strong>Update Logic:</strong> Only affected partitions are modified</p>
+                <p><strong>Catalog Update:</strong> Automatic schema and partition discovery</p>
+            </div>
+
+            <div class="table-preview">
+                <div class="table-title">🏢 AWS Glue Data Catalog - regulatory_reporting_db.compliance_filings</div>
+                <div class="schema-info">
+                    <h4>📋 Table Schema & Metadata</h4>
+                    <p><strong>Database:</strong> regulatory_reporting_db | <strong>Table:</strong> compliance_filings | <strong>Format:</strong> Parquet</p>
+                    <p><strong>Location:</strong> s3://aws-financial-datalake/regulatory/ | <strong>Partitioned:</strong> Yes (filing_year, quarter, jurisdiction)</p>
+                    <p><strong>SerDe:</strong> org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe | <strong>Retention:</strong> 7 years (SEC requirement)</p>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>filing_id</th>
+                            <th>institution_lei</th>
+                            <th>regulatory_form</th>
+                            <th>filing_amount_usd</th>
+                            <th>submission_timestamp</th>
+                            <th>jurisdiction</th>
+                            <th>validation_status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="updated-row">
+                            <td>FIL_2024_Q1_001001</td>
+                            <td>LEI_549300ABCD1234567890</td>
+                            <td>10-K_ANNUAL_REPORT</td>
+                            <td>2,450,750,000.00 → 2,467,890,000.00</td>
+                            <td>2024-01-31T17:00:00Z</td>
+                            <td>US_SEC</td>
+                            <td>AMENDED_FILING</td>
+                        </tr>
+                        <tr>
+                            <td>FIL_2024_Q1_001002</td>
+                            <td>LEI_549300EFGH5678901234</td>
+                            <td>CCAR_STRESS_TEST</td>
+                            <td>1,987,230,000.00</td>
+                            <td>2024-02-15T23:59:59Z</td>
+                            <td>US_FED</td>
+                            <td>ACCEPTED</td>
+                        </tr>
+                        <tr>
+                            <td>FIL_2024_Q1_001003</td>
+                            <td>LEI_549300IJKL9012345678</td>
+                            <td>EMIR_TRADE_REPOSITORY</td>
+                            <td>845,920,000.00</td>
+                            <td>2024-02-28T16:30:00Z</td>
+                            <td>EU_ESMA</td>
+                            <td>VALIDATED</td>
+                        </tr>
+                        <tr class="new-row">
+                            <td>FIL_2024_Q1_001004</td>
+                            <td>LEI_549300MNOP3456789012</td>
+                            <td>BASEL_III_LIQUIDITY</td>
+                            <td>3,213,450,000.00</td>
+                            <td>2024-03-31T18:00:00Z</td>
+                            <td>US_OCC</td>
+                            <td>UNDER_REVIEW</td>
+                        </tr>
+                        <tr class="new-row">
+                            <td>FIL_2024_Q1_001005</td>
+                            <td>LEI_549300QRST7890123456</td>
+                            <td>VOLCKER_RULE_METRICS</td>
+                            <td>756,680,000.00</td>
+                            <td>2024-03-31T20:15:00Z</td>
+                            <td>US_CFTC</td>
+                            <td>PRELIMINARY_REVIEW</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="partition-info">
+                    <h4>🎯 Dynamic Regulatory Compliance Management</h4>
+                    <p><strong>Updated Filings:</strong> filing_year=2024/quarter=Q1/jurisdiction=US_SEC/ (10-K amendment processed)</p>
+                    <p><strong>New Submissions:</strong> filing_year=2024/quarter=Q1/jurisdiction=US_OCC/, filing_year=2024/quarter=Q1/jurisdiction=US_CFTC/</p>
+                    <p><strong>Audit Trail:</strong> All filing modifications logged with digital signatures and timestamps</p>
+                    <p><strong>Compliance Status:</strong> Basel III reporting deadlines met, Volcker Rule metrics submitted on time</p>
+                    <p><strong>Data Lineage:</strong> Source trading systems → Risk calculations → Regulatory transformations → Filing submission</p>
+                </div>
+            </div>
