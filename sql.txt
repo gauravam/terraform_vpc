@@ -234,5 +234,9 @@ Other key limits:
 Solution: Request limit increase through AWS Support (can go up to 50-100+)
     cx_Oracle._oracle_client_initialized = True
 
+**Append Mode:** Use for **incremental data ingestion** when you need to preserve complete **data lineage** and maintain **ACID compliance**. This mode implements **immutable storage patterns** where new records are added without modifying existing data, ensuring **zero data loss** and supporting **time-series analytics**. Perfect for **event streaming**, **CDC (Change Data Capture)** pipelines, **audit logs**, and **data lake bronze layers** where historical preservation is critical for **regulatory compliance** and **forensic analysis**.
 
+**Overwrite Mode:** Use for **full refresh patterns** when implementing **dimension table reloads**, **snapshot replacements**, or **data quality remediation**. This mode performs **atomic operations** by completely replacing the target dataset, making it ideal for **reference data management**, **slowly changing dimensions (Type 1)**, **staging table refreshes**, and **ETL error recovery** scenarios. Critical for **data warehouse fact tables** and **master data management** where stale data must be completely purged and replaced with authoritative sources.
+
+**Dynamic Save Mode:** Use for **partition-aware processing** in **big data architectures** where you need **selective data mutation** with **optimized I/O operations**. This mode leverages **predicate pushdown** and **partition pruning** to update only affected **Hive partitions** while maintaining **MVCC (Multi-Version Concurrency Control)**. Essential for **late-arriving data**, **slowly changing dimensions (Type 2)**, **partition-based upserts**, **data lake silver/gold layers**, and **Delta Lake merge operations** where you need **ACID transactions** with **schema evolution** support.
 
