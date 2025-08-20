@@ -525,3 +525,21 @@ ORDER BY s.starttime;
 
 
 
+-- First get the table OID
+SELECT oid, relname 
+FROM pg_class 
+WHERE relname = 'your_table_name';
+
+-- Then find locks on that specific OID
+SELECT 
+    l.pid,
+    l.mode,
+    l.granted,
+    a.starttime,
+    a.usename,
+    DATEDIFF(minutes, a.starttime, GETDATE()) as duration_minutes
+FROM pg_locks l
+JOIN pg_stat_activity a ON l.pid = a.procpid
+WHERE l.relation = 12345  -- replace with the OID from above query
+AND l.mode LIKE '%Exclusive%';
+
