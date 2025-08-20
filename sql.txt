@@ -234,12 +234,285 @@ Other key limits:
 Solution: Request limit increase through AWS Support (can go up to 50-100+)
     cx_Oracle._oracle_client_initialized = True
 
-**Append Mode:** Use for **incremental data ingestion** when you need to preserve complete **data lineage** and maintain **ACID compliance**. This mode implements **immutable storage patterns** where new records are added without modifying existing data, ensuring **zero data loss** and supporting **time-series analytics**. Perfect for **event streaming**, **CDC (Change Data Capture)** pipelines, **audit logs**, and **data lake bronze layers** where historical preservation is critical for **regulatory compliance** and **forensic analysis**.
 
-**Overwrite Mode:** Use for **full refresh patterns** when implementing **dimension table reloads**, **snapshot replacements**, or **data quality remediation**. This mode performs **atomic operations** by completely replacing the target dataset, making it ideal for **reference data management**, **slowly changing dimensions (Type 1)**, **staging table refreshes**, and **ETL error recovery** scenarios. Critical for **data warehouse fact tables** and **master data management** where stale data must be completely purged and replaced with authoritative sources.
 
-**Dynamic Save Mode:** Use for **partition-aware processing** in **big data architectures** where you need **selective data mutation** with **optimized I/O operations**. This mode leverages **predicate pushdown** and **partition pruning** to update only affected **Hive partitions** while maintaining **MVCC (Multi-Version Concurrency Control)**. Essential for **late-arriving data**, **slowly changing dimensions (Type 2)**, **partition-based upserts**, **data lake silver/gold layers**, and **Delta Lake merge operations** where you need **ACID transactions** with **schema evolution** support.
 
-Append Mode: AWS Glue writes new Parquet files alongside existing files in your S3 table location. The Glue Data Catalog automatically registers new partitions and updates table metadata without affecting existing entries. Your S3 bucket grows with additional objects while preserving all historical data. Table queries can access both old and new data seamlessly, and partition discovery ensures new data becomes immediately queryable through services like Athena and Redshift Spectrum.
-Overwrite Mode: AWS Glue performs a complete deletion of all existing S3 objects in the table path, then writes fresh Parquet files. The Glue Data Catalog replaces all existing partition metadata with new entries, effectively recreating the table structure. Your S3 storage is completely refreshed - old data disappears permanently and new data takes its place. This creates a clean slate but requires careful consideration since data recovery becomes impossible after execution.
-Dynamic Save Mode: AWS Glue analyzes your partitioned table structure and updates only the S3 prefixes that contain changed data. The Glue Data Catalog selectively updates partition metadata for modified sections while preserving unchanged partitions. Some S3 objects get replaced while others remain untouched, creating an efficient update pattern. This approach optimizes both storage costs and query performance by minimizing unnecessary data movement and maintaining table history where appropriate.
+"""
+Production-Ready Excel DataFrame Formatter
+==========================================
+
+This script formats a pandas DataFrame into an Excel file with:
+- Blue headers
+- Even column spacing
+- No decimals for specified columns
+- Totals row for numerical columns
+- Red color for negative values
+- Yellow highlighting for specified column
+
+Dependencies: pandas, openpyxl
+"""
+
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.utils import get_column_letter
+import logging
+from typing import List, Optional, Union
+import os
+
+
+class ExcelFormatter:
+    """
+    A class to format pandas DataFrames into styled Excel files.
+    """
+    
+    def __init__(self):
+        """Initialize the ExcelFormatter with default styles."""
+        # Define color schemes
+        self.BLUE_HEADER = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        self.YELLOW_HIGHLIGHT = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+        self.RED_NEGATIVE = Font(color="FF0000")
+        
+        # Define fonts and alignment
+        self.HEADER_FONT = Font(color="FFFFFF", bold=True, size=11)
+        self.REGULAR_FONT = Font(size=10)
+        self.CENTER_ALIGNMENT = Alignment(horizontal="center", vertical="center")
+        
+        # Define borders
+        self.THIN_BORDER = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # Setup logging
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger(__name__)
+    
+    def create_styled_excel(self, 
+                          df: pd.DataFrame,
+                          output_path: str,
+                          no_decimal_columns: Optional[List[str]] = None,
+                          yellow_column: Optional[str] = None,
+                          sheet_name: str = "Data",
+                          column_width: int = 15) -> bool:
+        """
+        Create a styled Excel file from a pandas DataFrame.
+        
+        Args:
+            df (pd.DataFrame): The input DataFrame
+            output_path (str): Path where the Excel file will be saved
+            no_decimal_columns (List[str], optional): Columns to format without decimals
+            yellow_column (str, optional): Column name to highlight in yellow
+            sheet_name (str): Name of the Excel sheet (default: "Data")
+            column_width (int): Width for all columns (default: 15)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Validate inputs
+            if df.empty:
+                self.logger.warning("DataFrame is empty")
+                return False
+            
+            if no_decimal_columns is None:
+                no_decimal_columns = []
+                
+            # Validate that specified columns exist
+            missing_cols = [col for col in no_decimal_columns if col not in df.columns]
+            if missing_cols:
+                self.logger.warning(f"Columns not found in DataFrame: {missing_cols}")
+                no_decimal_columns = [col for col in no_decimal_columns if col in df.columns]
+            
+            if yellow_column and yellow_column not in df.columns:
+                self.logger.warning(f"Yellow column '{yellow_column}' not found in DataFrame")
+                yellow_column = None
+            
+            # Create workbook and worksheet
+            wb = Workbook()
+            ws = wb.active
+            ws.title = sheet_name
+            
+            # Add DataFrame data to worksheet
+            for r in dataframe_to_rows(df, index=False, header=True):
+                ws.append(r)
+            
+            # Calculate totals for numerical columns
+            totals_row = self._calculate_totals(df)
+            if totals_row:
+                # Add "Total" label in first column
+                totals_row[0] = "TOTAL"
+                ws.append(totals_row)
+            
+            # Apply styling
+            self._apply_header_styling(ws, df.columns)
+            self._apply_column_formatting(ws, df, no_decimal_columns, yellow_column)
+            self._apply_negative_number_formatting(ws, df)
+            self._set_column_widths(ws, df.columns, column_width)
+            self._apply_borders(ws, df.shape[0] + (2 if totals_row else 1), len(df.columns))
+            
+            # Save the workbook
+            self._ensure_directory_exists(output_path)
+            wb.save(output_path)
+            
+            self.logger.info(f"Excel file successfully created: {output_path}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error creating Excel file: {str(e)}")
+            return False
+    
+    def _calculate_totals(self, df: pd.DataFrame) -> Optional[List]:
+        """Calculate totals for numerical columns."""
+        try:
+            totals = []
+            numerical_columns = df.select_dtypes(include=['int64', 'float64', 'int32', 'float32']).columns
+            
+            if len(numerical_columns) == 0:
+                return None
+            
+            for col in df.columns:
+                if col in numerical_columns:
+                    total = df[col].sum()
+                    totals.append(total)
+                else:
+                    totals.append("")  # Empty cell for non-numerical columns
+            
+            return totals
+            
+        except Exception as e:
+            self.logger.error(f"Error calculating totals: {str(e)}")
+            return None
+    
+    def _apply_header_styling(self, ws, columns: List[str]):
+        """Apply blue background and white font to headers."""
+        try:
+            for col_idx, _ in enumerate(columns, 1):
+                cell = ws.cell(row=1, column=col_idx)
+                cell.fill = self.BLUE_HEADER
+                cell.font = self.HEADER_FONT
+                cell.alignment = self.CENTER_ALIGNMENT
+                
+        except Exception as e:
+            self.logger.error(f"Error applying header styling: {str(e)}")
+    
+    def _apply_column_formatting(self, ws, df: pd.DataFrame, no_decimal_columns: List[str], yellow_column: Optional[str]):
+        """Apply column-specific formatting."""
+        try:
+            for col_idx, col_name in enumerate(df.columns, 1):
+                col_letter = get_column_letter(col_idx)
+                
+                # Apply no decimal formatting to specified columns
+                if col_name in no_decimal_columns:
+                    for row_idx in range(2, len(df) + 3):  # +3 to include totals row
+                        cell = ws[f"{col_letter}{row_idx}"]
+                        if isinstance(cell.value, (int, float)):
+                            cell.number_format = '0'  # No decimal places
+                
+                # Apply yellow highlighting to specified column
+                if col_name == yellow_column:
+                    for row_idx in range(2, len(df) + 2):  # Data rows only (excluding totals)
+                        cell = ws[f"{col_letter}{row_idx}"]
+                        cell.fill = self.YELLOW_HIGHLIGHT
+                
+                # Center align all data cells
+                for row_idx in range(1, len(df) + 3):
+                    cell = ws[f"{col_letter}{row_idx}"]
+                    cell.alignment = self.CENTER_ALIGNMENT
+                    if row_idx > 1:  # Skip header
+                        cell.font = self.REGULAR_FONT
+                        
+        except Exception as e:
+            self.logger.error(f"Error applying column formatting: {str(e)}")
+    
+    def _apply_negative_number_formatting(self, ws, df: pd.DataFrame):
+        """Apply red color to negative numbers."""
+        try:
+            numerical_columns = df.select_dtypes(include=['int64', 'float64', 'int32', 'float32']).columns
+            
+            for col_idx, col_name in enumerate(df.columns, 1):
+                if col_name in numerical_columns:
+                    col_letter = get_column_letter(col_idx)
+                    
+                    # Check data rows and totals row
+                    for row_idx in range(2, len(df) + 3):
+                        cell = ws[f"{col_letter}{row_idx}"]
+                        if isinstance(cell.value, (int, float)) and cell.value < 0:
+                            # Keep existing fill color but change font to red
+                            current_fill = cell.fill
+                            cell.font = Font(color="FF0000", size=10)
+                            cell.fill = current_fill  # Preserve background color
+                            
+        except Exception as e:
+            self.logger.error(f"Error applying negative number formatting: {str(e)}")
+    
+    def _set_column_widths(self, ws, columns: List[str], width: int):
+        """Set uniform column widths."""
+        try:
+            for col_idx in range(1, len(columns) + 1):
+                col_letter = get_column_letter(col_idx)
+                ws.column_dimensions[col_letter].width = width
+                
+        except Exception as e:
+            self.logger.error(f"Error setting column widths: {str(e)}")
+    
+    def _apply_borders(self, ws, num_rows: int, num_cols: int):
+        """Apply borders to all cells."""
+        try:
+            for row in range(1, num_rows + 1):
+                for col in range(1, num_cols + 1):
+                    cell = ws.cell(row=row, column=col)
+                    cell.border = self.THIN_BORDER
+                    
+        except Exception as e:
+            self.logger.error(f"Error applying borders: {str(e)}")
+    
+    def _ensure_directory_exists(self, file_path: str):
+        """Ensure the directory for the output file exists."""
+        directory = os.path.dirname(file_path)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory)
+
+
+
+
+  """
+  Example usage of the ExcelFormatter class.
+  """
+  # Create sample DataFrame
+  sample_data = {
+      'Product': ['Product A', 'Product B', 'Product C', 'Product D'],
+      'Sales': [1500.75, -250.30, 3200.80, 1800.45],
+      'Quantity': [100, 50, 200, 150],
+      'Profit': [450.25, -75.10, 960.24, 540.15],
+      'Region': ['North', 'South', 'East', 'West']
+  }
+  
+  df = pd.DataFrame(sample_data)
+  
+  # Initialize formatter
+  formatter = ExcelFormatter()
+  
+  # Create styled Excel file
+  success = formatter.create_styled_excel(
+      df=df,
+      output_path="output/styled_report.xlsx",
+      no_decimal_columns=['Sales', 'Quantity', 'Profit'],  # No decimals for these columns
+      yellow_column='Product',  # Highlight this column in yellow
+      sheet_name="Sales Report",
+      column_width=18
+  )
+  
+  if success:
+      print("Excel file created successfully!")
+  else:
+      print("Failed to create Excel file.")
+
+
+
+
+
+
