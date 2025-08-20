@@ -543,3 +543,17 @@ JOIN pg_stat_activity a ON l.pid = a.procpid
 WHERE l.relation = 12345  -- replace with the OID from above query
 AND l.mode LIKE '%Exclusive%';
 
+
+-- Get current/recent queries for the PID
+SELECT 
+    pid,
+    query,
+    starttime,
+    endtime,
+    elapsed,
+    LEFT(querytxt, 100) as query_preview  -- first 100 chars
+FROM stl_query 
+WHERE pid = 12345  -- replace with your PID
+ORDER BY starttime DESC
+LIMIT 10;
+
