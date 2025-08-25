@@ -384,3 +384,50 @@ if __name__ == "__main__":
     # Run examples
     example_usage()
     advanced_example()
+
+
+
+
+
+def _add_total_row(self, df):
+    """Add calculated total row to DataFrame with preserved column order"""
+    if not self.config.get('add_total_row', False):
+        return df
+        
+    total_row_label = self.config.get('total_row_label', 'TOTAL')
+    exclude_columns = self.config.get('exclude_from_total', [])
+    
+    # Initialize total_row dictionary with all columns in original order
+    total_row = {col: '' for col in df.columns}
+    first_column = df.columns[0]
+    
+    # Populate total_row values in the same column order
+    for column in df.columns:
+        col_config = self.config.get(column, {})
+        col_type = col_config.get('type', 'text')
+        
+        if column == first_column:
+            # First column gets the total label
+            total_row[column] = total_row_label
+        elif column in exclude_columns:
+            # Excluded columns get empty string
+            total_row[column] = ''
+        elif col_type == 'numerical':
+            # Sum numerical columns
+            try:
+                total_row[column] = df[column].sum()
+            except:
+                total_row[column] = 0
+        elif col_type == 'percentage':
+            # Average for percentages
+            try:
+                total_row[column] = df[column].mean()
+            except:
+                total_row[column] = 0
+        else:
+            # Other types get empty string (already set above)
+            pass
+    
+    # Create DataFrame with explicit column order
+    total_df = pd.DataFrame([total_row], columns=df.columns)
+    return pd.concat([df, total_df], ignore_index=True)
