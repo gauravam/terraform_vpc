@@ -1,0 +1,386 @@
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.utils import get_column_letter
+
+class ExcelFormatter:
+    def __init__(self, config, header_config=None):
+        """
+        Initialize with configuration dictionary
+        
+        Config structure:
+        {
+            'column_name': {
+                'width': 'auto' or number,
+                'type': 'text', 'numerical', 'percentage', 'date',
+                'alignment': 'left', 'center', 'right',
+                'background_color': 'FFFF00' (hex color),
+                'font_color': '000000' (hex color),
+                'header_bg_color': 'FFFF00' (hex color),
+                'header_font_color': 'FFFFFF' (hex color)
+            },
+            'add_total_row': True,  # Automatically calculate and add total row
+            'total_row_label': 'TOTAL',  # Label for the total row (first column)
+            'exclude_from_total': ['column1', 'column2']  # Columns to exclude from total calculation
+        }
+        
+        Or use global header_config:
+        header_config = {
+            'background_color': '366092',
+            'font_color': 'FFFFFF',
+            'bold': True,
+            'alignment': 'center'
+        }
+        """
+        self.config = config
+        self.header_config = header_config or {
+            'background_color': '366092',
+            'font_color': 'FFFFFF',
+            'bold': True,
+            'alignment': 'center'
+        }
+        
+    def _add_total_row(self, df):
+        """Add calculated total row to DataFrame"""
+        if not self.config.get('add_total_row', False):
+            return df
+            
+        total_row_label = self.config.get('total_row_label', 'TOTAL')
+        exclude_columns = self.config.get('exclude_from_total', [])
+        
+        # Create total row dictionary
+        total_row = {}
+        first_column = df.columns[0]
+        
+        for column in df.columns:
+            col_config = self.config.get(column, {})
+            col_type = col_config.get('type', 'text')
+            
+            if column == first_column:
+                # First column gets the total label
+                total_row[column] = total_row_label
+            elif column in exclude_columns:
+                # Excluded columns get empty string or specific value
+                total_row[column] = ''
+            elif col_type == 'numerical':
+                # Sum numerical columns
+                try:
+                    total_row[column] = df[column].sum()
+                except:
+                    total_row[column] = 0
+            elif col_type == 'percentage':
+                # Average for percentages
+                try:
+                    total_row[column] = df[column].mean()
+                except:
+                    total_row[column] = 0
+            else:
+                # Other types get empty string
+                total_row[column] = ''
+        
+        # Add total row to DataFrame
+        total_df = pd.DataFrame([total_row])
+        return pd.concat([df, total_df], ignore_index=True)
+    
+    def format_dataframe_to_excel(self, df, filename, sheet_name='Sheet1'):
+        """
+        Convert DataFrame to formatted Excel file
+        """
+        # Add total row if requested
+        df_with_totals = self._add_total_row(df)
+        
+        # Create workbook and worksheet
+        wb = Workbook()
+        ws = wb.active
+        ws.title = sheet_name
+        
+        # Add data to worksheet
+        for r in dataframe_to_rows(df_with_totals, index=False, header=True):
+            ws.append(r)
+        
+        # Apply formatting
+        self._format_headers(ws, df_with_totals.columns)
+        self._format_data(ws, df_with_totals)
+        self._set_column_widths(ws, df_with_totals)
+        self._add_borders(ws)
+        
+        # Save file
+        wb.save(filename)
+        print(f"Excel file '{filename}' created successfully!")
+        
+    def _format_headers(self, ws, columns):
+        """Format header row with individual or global header configuration"""
+        for col_num, column in enumerate(columns, 1):
+            cell = ws.cell(row=1, column=col_num)
+            col_config = self.config.get(column, {})
+            
+            # Check for individual column header config first, then fall back to global
+            header_bg = col_config.get('header_bg_color', self.header_config['background_color'])
+            header_font_color = col_config.get('header_font_color', self.header_config['font_color'])
+            header_bold = col_config.get('header_bold', self.header_config.get('bold', True))
+            header_alignment = col_config.get('header_alignment', self.header_config.get('alignment', 'center'))
+            
+            # Apply header formatting
+            cell.font = Font(bold=header_bold, color=header_font_color)
+            cell.fill = PatternFill(start_color=header_bg, end_color=header_bg, fill_type='solid')
+            
+            if header_alignment == 'center':
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            elif header_alignment == 'right':
+                cell.alignment = Alignment(horizontal='right', vertical='center')
+            else:
+                cell.alignment = Alignment(horizontal='left', vertical='center')
+    
+    def _format_data(self, ws, df):
+        """Format data rows based on configuration"""
+        total_row_label = self.config.get('total_row_label', 'TOTAL')
+        
+        for col_num, column in enumerate(df.columns, 1):
+            col_config = self.config.get(column, {})
+            col_type = col_config.get('type', 'text')
+            alignment = col_config.get('alignment', 'left')
+            bg_color = col_config.get('background_color')
+            font_color = col_config.get('font_color', '000000')
+            
+            # Start from row 2 (skip header)
+            for row_num in range(2, len(df) + 2):
+                cell = ws.cell(row=row_num, column=col_num)
+                cell_value = cell.value
+                
+                # Check if this is the total row (last row if add_total_row is True)
+                is_total_row = (
+                    self.config.get('add_total_row', False) and 
+                    row_num == len(df) + 1  # Last row
+                )
+                
+                # Set number format based on type
+                if col_type == 'numerical':
+                    cell.number_format = '#,##0'  # No decimal points, comma separator
+                elif col_type == 'percentage':
+                    cell.number_format = '0.00%'
+                elif col_type == 'date':
+                    cell.number_format = 'mm/dd/yyyy'
+                
+                # Determine font color - check for negative numbers first
+                final_font_color = font_color
+                
+                # Check if it's a numerical value and negative
+                if col_type == 'numerical' and cell_value is not None:
+                    try:
+                        numeric_value = float(cell_value)
+                        if numeric_value < 0:
+                            final_font_color = 'FF0000'  # Red for negative numbers
+                    except (ValueError, TypeError):
+                        pass  # Keep original color if not a number
+                
+                # Set font - bold only for total rows
+                cell.font = Font(
+                    bold=is_total_row,
+                    color=final_font_color
+                )
+                
+                # Set alignment
+                if alignment == 'center':
+                    cell.alignment = Alignment(horizontal='center')
+                elif alignment == 'right':
+                    cell.alignment = Alignment(horizontal='right')
+                else:
+                    cell.alignment = Alignment(horizontal='left')
+                
+                # Set background color
+                if bg_color:
+                    cell.fill = PatternFill(start_color=bg_color, end_color=bg_color, fill_type='solid')
+                
+                # Special formatting for total rows
+                if is_total_row:
+                    cell.fill = PatternFill(start_color='E6E6E6', end_color='E6E6E6', fill_type='solid')
+    
+    def _set_column_widths(self, ws, df):
+        """Set column widths based on configuration"""
+        for col_num, column in enumerate(df.columns, 1):
+            col_config = self.config.get(column, {})
+            width = col_config.get('width', 'auto')
+            
+            col_letter = get_column_letter(col_num)
+            
+            if width == 'auto':
+                # Auto-size based on content
+                max_length = max(
+                    len(str(column)),  # Header length
+                    max([len(str(cell)) for cell in df[column]], default=0)  # Max data length
+                )
+                ws.column_dimensions[col_letter].width = min(max_length + 2, 50)  # Cap at 50
+            else:
+                # Set specific width
+                ws.column_dimensions[col_letter].width = width
+    
+    def _add_borders(self, ws):
+        """Add borders to all cells with data"""
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row, 
+                              min_col=1, max_col=ws.max_column):
+            for cell in row:
+                cell.border = thin_border
+
+
+# Example usage - Automatic total row calculation
+def example_usage():
+    # Create sample DataFrame WITHOUT any total row - it will be calculated automatically
+    data = {
+        'Product': ['Widget A', 'Widget B', 'Widget C', 'Widget D'],
+        'Sales': [12345, -5000, 23456, 45678],  # Will be summed: 76,479
+        'Revenue': [1234567, 2345678, -500000, 4567890],  # Will be summed: 7,648,135
+        'Growth %': [0.15, 0.23, -0.05, 0.18],  # Will be averaged: 12.75%
+        'Date': pd.to_datetime(['2024-01-01', '2024-02-01', '2024-03-01', '2024-04-01'])  # Will be blank
+    }
+    
+    df = pd.DataFrame(data)
+    
+    # Define configuration with automatic total row
+    config = {
+        'Product': {
+            'width': 15,
+            'type': 'text',
+            'alignment': 'left',
+            'header_bg_color': '4472C4',
+            'header_font_color': 'FFFFFF'
+        },
+        'Sales': {
+            'width': 'auto',
+            'type': 'numerical',  # Will be summed in total row
+            'alignment': 'right',
+            'header_bg_color': '70AD47',
+            'header_font_color': 'FFFFFF'
+        },
+        'Revenue': {
+            'width': 'auto',
+            'type': 'numerical',  # Will be summed in total row
+            'alignment': 'right',
+            'header_bg_color': '70AD47',
+            'header_font_color': 'FFFFFF'
+        },
+        'Growth %': {
+            'width': 12,
+            'type': 'percentage',  # Will be averaged in total row
+            'alignment': 'center',
+            'header_bg_color': 'FFC000',
+            'header_font_color': '000000'
+        },
+        'Date': {
+            'width': 12,
+            'type': 'date',  # Will be blank in total row
+            'alignment': 'center',
+            'header_bg_color': '7030A0',
+            'header_font_color': 'FFFFFF'
+        },
+        
+        # Automatic total row configuration
+        'add_total_row': True,  # Enable automatic total calculation
+        'total_row_label': 'TOTAL',  # Label for first column of total row
+        'exclude_from_total': ['Date']  # Don't calculate totals for these columns
+    }
+    
+    global_header_config = {
+        'background_color': '366092',
+        'font_color': 'FFFFFF',
+        'bold': True,
+        'alignment': 'center'
+    }
+    
+    formatter = ExcelFormatter(config, global_header_config)
+    formatter.format_dataframe_to_excel(df, 'formatted_report.xlsx', 'Sales Report')
+
+# Advanced example with automatic totals
+def advanced_example():
+    # Create sample DataFrame WITHOUT totals - they will be calculated
+    data = {
+        'Region': ['North', 'South', 'East', 'West'],
+        'Q1 Sales': [150000, -20000, 180000, 140000],  # Sum: 450,000
+        'Q2 Sales': [160000, 125000, 195000, -15000],  # Sum: 465,000
+        'Q3 Sales': [155000, 130000, -25000, 150000],  # Sum: 410,000
+        'Q4 Sales': [170000, 135000, 200000, 155000],  # Sum: 660,000
+        'Total Revenue': [635000, 370000, 550000, 430000],  # Sum: 1,985,000
+        'Growth Rate': [0.12, -0.08, 0.15, -0.05]  # Average: 3.5%
+    }
+    
+    df = pd.DataFrame(data)
+    
+    # Configuration with automatic total calculation
+    config = {
+        'Region': {
+            'width': 15,
+            'type': 'text',
+            'alignment': 'left',
+            'header_bg_color': '2F5597',
+            'header_font_color': 'FFFFFF'
+        },
+        'Q1 Sales': {
+            'width': 'auto',
+            'type': 'numerical',
+            'alignment': 'right',
+            'header_bg_color': '5B9BD5',
+            'header_font_color': 'FFFFFF'
+        },
+        'Q2 Sales': {
+            'width': 'auto',
+            'type': 'numerical',
+            'alignment': 'right',
+            'header_bg_color': '5B9BD5',
+            'header_font_color': 'FFFFFF'
+        },
+        'Q3 Sales': {
+            'width': 'auto',
+            'type': 'numerical',
+            'alignment': 'right',
+            'header_bg_color': '5B9BD5',
+            'header_font_color': 'FFFFFF'
+        },
+        'Q4 Sales': {
+            'width': 'auto',
+            'type': 'numerical',
+            'alignment': 'right',
+            'header_bg_color': '5B9BD5',
+            'header_font_color': 'FFFFFF'
+        },
+        'Total Revenue': {
+            'width': 'auto',
+            'type': 'numerical',
+            'alignment': 'right',
+            'header_bg_color': 'C55A5A',
+            'header_font_color': 'FFFFFF'
+        },
+        'Growth Rate': {
+            'width': 12,
+            'type': 'percentage',
+            'alignment': 'center',
+            'header_bg_color': '70AD47',
+            'header_font_color': 'FFFFFF'
+        },
+        
+        # Automatic total calculation settings
+        'add_total_row': True,
+        'total_row_label': 'GRAND TOTAL',
+        'exclude_from_total': []  # Calculate totals for all applicable columns
+    }
+    
+    global_header_config = {
+        'background_color': '4472C4',
+        'font_color': 'FFFFFF',
+        'bold': True,
+        'alignment': 'center'
+    }
+    
+    formatter = ExcelFormatter(config, global_header_config)
+    formatter.format_dataframe_to_excel(df, 'advanced_report_123.xlsx', 'Regional Sales')
+
+if __name__ == "__main__":
+    # Run examples
+    example_usage()
+    advanced_example()
