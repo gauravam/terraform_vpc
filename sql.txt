@@ -568,4 +568,8 @@ def analyze_partitions(df):
     print(f"Min rows in partition: {min(partition_counts)}")
     print(f"Max rows in partition: {max(partition_counts)}")
     print(f"Average rows per partition: {sum(partition_counts)/len(partition_counts):.2f}")
-
+\
+# This is perfect - no RDD operations needed
+distinct_codes_df = df.select("code").distinct().limit(50000)
+distinct_codes_list = [row['code'] for row in distinct_codes_df.collect()]
+sql_query = f"DELETE FROM table WHERE code IN ({','.join([f\"'{code}'\" for code in distinct_codes_list])})"
