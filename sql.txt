@@ -573,3 +573,31 @@ def analyze_partitions(df):
 distinct_codes_df = df.select("code").distinct().limit(50000)
 distinct_codes_list = [row['code'] for row in distinct_codes_df.collect()]
 sql_query = f"DELETE FROM table WHERE code IN ({','.join([f\"'{code}'\" for code in distinct_codes_list])})"
+
+
+
+
+# Set your target table name
+target_table_name = "my_redshift_table"
+
+# Create VALUES clause
+values = []
+for index, row in df.iterrows():
+    # Escape single quotes to prevent SQL injection
+    code_escaped = str(row['code']).replace("'", "''")
+    hash_key_escaped = str(row['hash_key']).replace("'", "''")
+    values.append(f"('{code_escaped}', '{hash_key_escaped}')")
+
+values_str = ", ".join(values)
+
+# Generate the complete SQL query
+sql_query = f"""
+DELETE FROM {target_table_name}
+WHERE code IN (
+    SELECT t.code 
+    FROM {target_table_name} t
+    INNER JOIN (VALUES {values_str}) AS new_data(code, hash_key) 
+        ON t.code = new_data.code 
+    WHERE t.hash_key != new_data.hash_key
+);"""
+
