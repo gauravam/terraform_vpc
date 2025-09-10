@@ -557,3 +557,15 @@ WHERE pid = 12345  -- replace with your PID
 ORDER BY starttime DESC
 LIMIT 10;
 
+
+
+def analyze_partitions(df):
+    # Get partition sizes
+    partition_counts = df.rdd.mapPartitions(lambda iterator: [sum(1 for _ in iterator)]).collect()
+    
+    print(f"Total partitions: {len(partition_counts)}")
+    print(f"Rows per partition: {partition_counts}")
+    print(f"Min rows in partition: {min(partition_counts)}")
+    print(f"Max rows in partition: {max(partition_counts)}")
+    print(f"Average rows per partition: {sum(partition_counts)/len(partition_counts):.2f}")
+
