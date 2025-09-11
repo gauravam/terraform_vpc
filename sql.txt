@@ -601,3 +601,22 @@ WHERE code IN (
     WHERE t.hash_key != new_data.hash_key
 );"""
 
+
+MERGE INTO main_table AS target
+USING delta_table AS source
+ON target.id = source.id
+
+-- Only update when ID exists AND hash_key is different
+WHEN MATCHED AND target.hash_key != source.hash_key THEN
+    UPDATE SET 
+        hash_key = source.hash_key,
+        column1 = source.column1,
+        column2 = source.column2,
+        updated_date = CURRENT_TIMESTAMP
+        -- add all columns you want to update
+
+-- Insert new IDs that don't exist in main table
+WHEN NOT MATCHED THEN
+    INSERT (id, hash_key, column1, column2, created_date, updated_date)
+    VALUES (source.id, source.hash_key, source.column1, source.column2, 
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
