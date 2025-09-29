@@ -1,11 +1,8 @@
 import pandas as pd
-from io import BytesIO
 import os
-import tempfile
-import shutil
 import json
-from pathlib import Path
 from typing import List, Dict
+import numpy as np
 
 
 def format_size(size_bytes: int) -> str:
@@ -30,19 +27,85 @@ def format_size(size_bytes: int) -> str:
         return f"{size_kb:.2f} KB"
 
 
+def estimate_parquet_size(df: pd.DataFrame, compression_ratio: float = 0.3) -> int:
+    """
+    Estimate parquet file size based on dataframe metrics.
+    
+    Parameters:
+    -----------
+    df : pd.DataFrame
+        DataFrame to estimate size for
+    compression_ratio : float
+        Expected compression ratio (0.2-0.4 typical for parquet with compression)
+        Lower = better compression. Default 0.3 means 30% of uncompressed size.
+        
+    Returns:
+    --------
+    int: Estimated size in bytes
+    """
+    # Get memory usage for each column
+    memory_usage = df.memory_usage(deep=True, index=False)
+    total_memory = memory_usage.sum()
+    
+    # Parquet metadata overhead (approximate)
+    # Includes file header, column metadata, row group metadata, etc.
+    base_overhead = 1024  # ~1KB base
+    per_column_overhead = len(df.columns) * 100  # ~100 bytes per column
+    per_row_group_overhead = 500  # ~500 bytes per row group
+    
+    # Estimate number of row groups (typically 1 for small partitions)
+    num_row_groups = max(1, len(df) // 1000)
+    
+    # Calculate total overhead
+    metadata_overhead = base_overhead + per_column_overhead + (per_row_group_overhead * num_row_groups)
+    
+    # Estimate compressed data size
+    # Different data types compress differently
+    compressed_size = 0
+    
+    for col in df.columns:
+        col_memory = memory_usage[col]
+        dtype = df[col].dtype
+        
+        # Adjust compression ratio based on data type
+        if pd.api.types.is_integer_dtype(dtype):
+            # Integers compress well, especially if sequential
+            col_compression = compression_ratio * 0.8
+        elif pd.api.types.is_float_dtype(dtype):
+            # Floats compress moderately
+            col_compression = compression_ratio * 1.0
+        elif pd.api.types.is_string_dtype(dtype) or dtype == object:
+            # Strings compress well if repetitive
+            unique_ratio = df[col].nunique() / len(df) if len(df) > 0 else 1
+            # More unique values = worse compression
+            col_compression = compression_ratio * (0.5 + 0.5 * unique_ratio)
+        elif pd.api.types.is_datetime64_any_dtype(dtype):
+            # Dates compress very well
+            col_compression = compression_ratio * 0.7
+        elif pd.api.types.is_bool_dtype(dtype):
+            # Booleans compress extremely well
+            col_compression = compression_ratio * 0.5
+        else:
+            # Default compression
+            col_compression = compression_ratio
+        
+        compressed_size += int(col_memory * col_compression)
+    
+    # Total estimated size
+    estimated_size = compressed_size + metadata_overhead
+    
+    return max(estimated_size, metadata_overhead)  # At minimum, return overhead
+
+
 def get_partition_stats(
     df: pd.DataFrame,
     partition_keys: List[str],
     base_path: str = "output",
-    memory_threshold_mb: float = 500,
+    compression_ratio: float = 0.3,
     path_style: str = "hive"
 ) -> List[Dict[str, any]]:
     """
-    Calculates Hive partition paths and statistics with automatic mode selection.
-    
-    Automatically chooses the best method based on dataset size:
-    - Small datasets (<threshold): Write to memory for accuracy
-    - Large datasets (>=threshold): Use temp files to avoid memory errors
+    Calculates Hive partition paths and statistics using memory-based metrics.
     
     Parameters:
     -----------
@@ -52,9 +115,9 @@ def get_partition_stats(
         Column names to use as partition keys
     base_path : str
         Base directory path for partition paths (virtual path, not created)
-    memory_threshold_mb : float
-        Memory size threshold in MB. If dataset exceeds this, use temp files.
-        Default is 500 MB.
+    compression_ratio : float
+        Expected compression ratio for parquet files (default 0.3 = 30% of original size)
+        Range: 0.2 (aggressive) to 0.5 (conservative)
     path_style : str
         Path style for partition paths:
         - 'hive': Use forward slashes (default, works for S3 and most systems)
@@ -67,12 +130,12 @@ def get_partition_stats(
         List of dictionaries containing partition info:
         - partition_path: Hive-style partition path
         - num_rows: Number of rows in partition
-        - size_bytes: Size of parquet file in bytes
+        - size_bytes: Estimated size of parquet file in bytes
         - size_kb: Size in kilobytes
         - size_mb: Size in megabytes
         - size_formatted: Human-readable size string
         - partition_values: Dict of partition key-value pairs
-        - method_used: 'memory', 'temp_files', or 'estimated'
+        - method_used: 'estimated'
         
     Example:
     --------
@@ -93,17 +156,10 @@ def get_partition_stats(
     
     # Calculate dataset memory usage
     dataset_memory_mb = df.memory_usage(deep=True).sum() / (1024 * 1024)
-    
-    # Automatically choose method based on size
-    use_temp_files = dataset_memory_mb >= memory_threshold_mb
-    
-    if use_temp_files:
-        print(f"Dataset size: {dataset_memory_mb:.2f} MB - Using temp files for safety")
-    else:
-        print(f"Dataset size: {dataset_memory_mb:.2f} MB - Using memory buffers")
+    print(f"Dataset size: {dataset_memory_mb:.2f} MB - Using metric-based estimation")
     
     partition_stats = []
-    grouped = df.groupby(partition_keys, dropna=False)
+    grouped = df.groupby(partition_keys)
     
     # Determine path separator based on style
     if path_style.lower() in ['hive', 's3']:
@@ -113,92 +169,32 @@ def get_partition_stats(
     else:
         raise ValueError(f"Invalid path_style: {path_style}. Must be 'hive', 's3', or 'os'")
     
-    if use_temp_files:
-        # Use temporary directory for large datasets
-        temp_dir = tempfile.mkdtemp()
-        try:
-            for partition_values, group_df in grouped:
-                if len(partition_keys) == 1:
-                    partition_values = (partition_values,)
-                
-                partition_parts = [
-                    f"{key}={value}" 
-                    for key, value in zip(partition_keys, partition_values)
-                ]
-                
-                # Construct Hive-style partition path
-                partition_path = path_sep.join([base_path] + partition_parts)
-                
-                # Create temp partition directory
-                temp_partition_path = os.path.join(temp_dir, *partition_parts)
-                os.makedirs(temp_partition_path, exist_ok=True)
-                
-                # Write parquet file to temp location
-                temp_file = os.path.join(temp_partition_path, "data.parquet")
-                group_df.to_parquet(temp_file, compression='snappy', index=False)
-                
-                # Get actual file size
-                file_size = os.path.getsize(temp_file)
-                
-                partition_stats.append({
-                    'partition_path': partition_path,
-                    'num_rows': len(group_df),
-                    'size_bytes': file_size,
-                    'size_kb': round(file_size / 1024, 2),
-                    'size_mb': round(file_size / (1024 * 1024), 2),
-                    'size_formatted': format_size(file_size),
-                    'partition_values': dict(zip(partition_keys, partition_values)),
-                    'method_used': 'temp_files'
-                })
-        finally:
-            # Clean up temp directory
-            shutil.rmtree(temp_dir, ignore_errors=True)
-    
-    else:
-        # Write to memory for smaller datasets
-        for partition_values, group_df in grouped:
-            if len(partition_keys) == 1:
-                partition_values = (partition_values,)
-            
-            partition_parts = [
-                f"{key}={value}" 
-                for key, value in zip(partition_keys, partition_values)
-            ]
-            
-            # Construct Hive-style partition path
-            partition_path = path_sep.join([base_path] + partition_parts)
-            
-            try:
-                # Calculate parquet size in memory
-                buffer = BytesIO()
-                group_df.to_parquet(buffer, compression='snappy', index=False)
-                file_size = buffer.tell()
-                buffer.close()
-                
-                partition_stats.append({
-                    'partition_path': partition_path,
-                    'num_rows': len(group_df),
-                    'size_bytes': file_size,
-                    'size_kb': round(file_size / 1024, 2),
-                    'size_mb': round(file_size / (1024 * 1024), 2),
-                    'size_formatted': format_size(file_size),
-                    'partition_values': dict(zip(partition_keys, partition_values)),
-                    'method_used': 'memory'
-                })
-            except MemoryError:
-                # Fallback to estimation if memory error occurs
-                print(f"Memory error on partition {partition_values}. Using estimation.")
-                estimated_size = int(group_df.memory_usage(deep=True).sum() * 0.3)
-                partition_stats.append({
-                    'partition_path': partition_path,
-                    'num_rows': len(group_df),
-                    'size_bytes': estimated_size,
-                    'size_kb': round(estimated_size / 1024, 2),
-                    'size_mb': round(estimated_size / (1024 * 1024), 2),
-                    'size_formatted': format_size(estimated_size),
-                    'partition_values': dict(zip(partition_keys, partition_values)),
-                    'method_used': 'estimated'
-                })
+    # Calculate statistics for each partition
+    for partition_values, group_df in grouped:
+        if len(partition_keys) == 1:
+            partition_values = (partition_values,)
+        
+        partition_parts = [
+            f"{key}={value}" 
+            for key, value in zip(partition_keys, partition_values)
+        ]
+        
+        # Construct Hive-style partition path
+        partition_path = path_sep.join([base_path] + partition_parts)
+        
+        # Estimate parquet size using metrics
+        estimated_size = estimate_parquet_size(group_df, compression_ratio)
+        
+        partition_stats.append({
+            'partition_path': partition_path,
+            'num_rows': len(group_df),
+            'size_bytes': estimated_size,
+            'size_kb': round(estimated_size / 1024, 2),
+            'size_mb': round(estimated_size / (1024 * 1024), 2),
+            'size_formatted': format_size(estimated_size),
+            'partition_values': dict(zip(partition_keys, partition_values)),
+            'method_used': 'estimated'
+        })
     
     return partition_stats
 
@@ -316,6 +312,7 @@ if __name__ == "__main__":
         sample_data, 
         partition_keys=['date', 'country'], 
         base_path='data/partitioned',
+        compression_ratio=0.3,  # 30% compression
         path_style='hive'
     )
 
