@@ -1,0 +1,95 @@
+-- ─────────────────────────────────────────────────────────
+-- Redshift ANALYZE audit
+-- stats_off  : 0 = fresh  |  100 = completely stale
+-- benefit    : estimated rows that need re-sampling
+-- priority   : CRITICAL / HIGH / MEDIUM / OK
+-- ─────────────────────────────────────────────────────────
+
+WITH last_analyze AS (
+    SELECT
+        tbl                                   AS table_id,
+        MAX(endtime)                          AS last_analyze_time,
+        MAX(CASE WHEN status = 'Full'
+                THEN endtime END)          AS last_full_analyze
+    FROM   stl_analyze
+    GROUP  BY tbl
+),
+table_stats AS (
+    SELECT
+        t."schema"                                       AS schema_name,
+        t."table"                                        AS table_name,
+        t.tbl_rows                                       AS total_rows,
+        t.size                                           AS size_mb,
+        t.stats_off                                      AS staleness_pct,
+
+        -- rows estimated to have changed since last ANALYZE
+        ROUND(t.tbl_rows * t.stats_off / 100.0)       AS estimated_stale_rows,
+
+        -- normalized benefit score (higher = more urgent)
+        ROUND(
+            (t.stats_off / 100.0)                       -- staleness weight  (0–1)
+          * LN(GREATEST(t.tbl_rows, 1))               -- size amplifier
+          * (1 + t.size / NULLIF(SUM(t.size)
+                    OVER(), 0))                        -- relative size bonus
+        , 2)                                           AS benefit_score,
+
+        a.last_analyze_time,
+        a.last_full_analyze,
+
+        DATEDIFF('day',
+            COALESCE(a.last_analyze_time,
+                     '1970-01-01'::timestamp),
+            GETDATE())                                 AS days_since_analyze,
+
+        -- priority tier
+        CASE
+            WHEN t.stats_off >= 50  OR
+                 a.last_analyze_time IS NULL          THEN 'CRITICAL'
+            WHEN t.stats_off >= 20  OR
+                 DATEDIFF('day',
+                     a.last_analyze_time,
+                     GETDATE()) >= 14              THEN 'HIGH'
+            WHEN t.stats_off >= 10  OR
+                 DATEDIFF('day',
+                     a.last_analyze_time,
+                     GETDATE()) >= 7               THEN 'MEDIUM'
+            ELSE                                       'OK'
+        END                                            AS priority
+
+    FROM   svv_table_info         t
+    LEFT   JOIN last_analyze      a ON a.table_id = t.table_id
+    WHERE  t."schema" NOT IN ('information_schema', 'pg_catalog')
+      AND  t.tbl_rows > 0        -- skip empty tables
+)
+
+SELECT
+    schema_name,
+    table_name,
+    TO_CHAR(total_rows, '999,999,999,999')  AS total_rows,
+    size_mb,
+    staleness_pct                             AS stats_off_pct,
+    TO_CHAR(estimated_stale_rows,
+            '999,999,999,999')             AS estimated_stale_rows,
+    benefit_score,
+    priority,
+    days_since_analyze,
+    last_analyze_time,
+    last_full_analyze,
+
+    -- ready-to-run command
+    'ANALYZE ' || schema_name
+               || '.'
+               || table_name
+               || ';'                        AS analyze_command
+
+FROM  table_stats
+WHERE priority IN ('CRITICAL', 'HIGH', 'MEDIUM')  -- remove to see all
+ORDER BY
+    CASE priority
+        WHEN 'CRITICAL' THEN 1
+        WHEN 'HIGH'     THEN 2
+        WHEN 'MEDIUM'   THEN 3
+        ELSE                 4
+    END,
+    benefit_score DESC,
+    size_mb       DESC;
