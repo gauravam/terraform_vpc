@@ -94,6 +94,13 @@ ORDER BY
     benefit_score DESC,
     size_mb       DESC;
 
+SELECT 
+    node,
+    slice,
+    memory_in_bytes,
+    memory_in_bytes / (1024.0 * 1024 * 1024) AS memory_gb
+FROM stv_partitions
+ORDER BY node, slice;
 
 
 SELECT 
