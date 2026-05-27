@@ -93,3 +93,12 @@ ORDER BY
     END,
     benefit_score DESC,
     size_mb       DESC;
+
+
+
+SELECT 
+    service_class,
+    num_query_tasks,
+    query_working_mem
+FROM stv_wlm_service_class_config
+WHERE service_class > 4;
