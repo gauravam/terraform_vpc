@@ -104,6 +104,17 @@ ORDER BY node, slice;
 
 
 SELECT 
+    c.service_class,
+    c.num_query_tasks,
+    c.query_working_mem,
+    e.name AS queue_name,
+    e.description
+FROM stv_wlm_service_class_config c
+JOIN stv_wlm_classification_config e 
+    ON c.service_class = e.action_service_class
+ORDER BY c.service_class;
+
+SELECT 
     service_class,
     num_query_tasks,
     query_working_mem
